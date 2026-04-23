@@ -20,19 +20,30 @@ export default function LoginPage() {
     setError('');
     setLoading(true);
 
-    const { error } = await supabase.auth.signInWithPassword({
-      email,
-      password,
-    });
+    try {
+      const { error, data } = await supabase.auth.signInWithPassword({
+        email,
+        password,
+      });
 
-    if (error) {
-      setError(error.message);
+      if (error) {
+        setError(error.message);
+        setLoading(false);
+        return;
+      }
+
+      if (!data?.session) {
+        setError('No se pudo iniciar sesión. Verifica que tu cuenta esté confirmada.');
+        setLoading(false);
+        return;
+      }
+
+      router.push('/');
+      router.refresh();
+    } catch (err: any) {
+      setError(err?.message || 'Error inesperado al iniciar sesión');
       setLoading(false);
-      return;
     }
-
-    router.push('/');
-    router.refresh();
   };
 
   const handleForgotPassword = async (e: React.FormEvent) => {

@@ -1,6 +1,27 @@
-// Local SQLite mode — use mock Supabase client
-import { createMockClient } from './mock-supabase';
+// Supabase client — uses real Supabase when env vars are set, otherwise falls back to local mock
+import { createClient as createSupabaseClient } from '@supabase/supabase-js';
+
+const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL;
+const SUPABASE_ANON_KEY = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+
+let _client: ReturnType<typeof createSupabaseClient> | null = null;
 
 export function createClient() {
+  if (SUPABASE_URL && SUPABASE_ANON_KEY) {
+    // Real Supabase
+    if (!_client) {
+      _client = createSupabaseClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
+        auth: {
+          persistSession: typeof window !== 'undefined',
+          autoRefreshToken: true,
+        },
+      });
+    }
+    return _client;
+  }
+
+  // Fallback to local mock (dev mode with SQLite)
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  const { createMockClient } = require('./mock-supabase');
   return createMockClient() as any;
 }

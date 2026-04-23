@@ -117,15 +117,15 @@ export default function LoginPage() {
           <form onSubmit={handleLogin} className="space-y-4">
             <div>
               <label htmlFor="email" className="block text-sm font-medium mb-1">
-                Usuario
+                Correo electrónico
               </label>
               <input
                 id="email"
-                type="text"
+                type="email"
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
                 className="input-field"
-                placeholder="ej: admin"
+                placeholder="usuario@lacomitiva.co"
                 required
               />
             </div>
@@ -172,7 +172,7 @@ export default function LoginPage() {
         <div className="mt-8 border-t border-[var(--border)] pt-6">
           <p className="text-[11px] text-[var(--text-subtle)] font-medium mb-2 uppercase tracking-wider">Demo</p>
           <div className="text-xs text-[var(--text-muted)] space-y-0.5">
-            <p>admin · servicio · cocina · bar</p>
+            <p>admin · servicio · cocina · bar <span className="text-[var(--text-subtle)]">@lacomitiva.co</span></p>
             <p className="text-[var(--text-subtle)]">Contraseña: demo1234</p>
           </div>
         </div>

@@ -3,8 +3,6 @@ import { createServerClient } from '@supabase/ssr';
 
 const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL;
 const SUPABASE_ANON_KEY = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
-
-// Local-mode cookie name
 const LOCAL_COOKIE = 'lc_session';
 
 export async function middleware(request: NextRequest) {
@@ -12,10 +10,7 @@ export async function middleware(request: NextRequest) {
   const isPublic = publicPaths.includes(request.nextUrl.pathname);
   const isApi = request.nextUrl.pathname.startsWith('/api/');
 
-  // Allow API routes through
   if (isApi) return NextResponse.next();
-
-  let isAuthenticated = false;
 
   if (SUPABASE_URL && SUPABASE_ANON_KEY) {
     // ── Real Supabase mode ──
@@ -35,15 +30,12 @@ export async function middleware(request: NextRequest) {
       },
     });
 
-    const { data: { user } } = await supabase.auth.getUser();
-    isAuthenticated = !!user;
+    // Use getSession() instead of getUser() — local JWT check, no network call
+    const { data: { session } } = await supabase.auth.getSession();
+    const isAuthenticated = !!session;
 
     if (isPublic) {
-      if (isAuthenticated && request.nextUrl.pathname === '/login') {
-        const url = request.nextUrl.clone();
-        url.pathname = '/';
-        return NextResponse.redirect(url);
-      }
+      // Don't redirect away from login even if authenticated — let the page handle it
       return response;
     }
 
@@ -57,30 +49,20 @@ export async function middleware(request: NextRequest) {
   } else {
     // ── Local SQLite mode ──
     const token = request.cookies.get(LOCAL_COOKIE)?.value;
+    let isAuthenticated = false;
     if (token) {
       const parts = token.split('.');
       if (parts.length === 3) {
         try {
           const payload = JSON.parse(atob(parts[1]));
-          if (payload.exp && payload.exp > Date.now() / 1000) {
-            isAuthenticated = true;
-          } else if (!payload.exp) {
-            isAuthenticated = true;
-          }
+          isAuthenticated = !payload.exp || payload.exp > Date.now() / 1000;
         } catch {
           isAuthenticated = false;
         }
       }
     }
 
-    if (isPublic) {
-      if (isAuthenticated && request.nextUrl.pathname === '/login') {
-        const url = request.nextUrl.clone();
-        url.pathname = '/';
-        return NextResponse.redirect(url);
-      }
-      return NextResponse.next();
-    }
+    if (isPublic) return NextResponse.next();
 
     if (!isAuthenticated) {
       const url = request.nextUrl.clone();

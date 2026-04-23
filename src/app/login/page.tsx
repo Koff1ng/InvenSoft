@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useEffect } from 'react';
 import { createClient } from '@/lib/supabase-client';
 import { useRouter } from 'next/navigation';
 import Image from 'next/image';
@@ -14,6 +14,13 @@ export default function LoginPage() {
   const [resetSent, setResetSent] = useState(false);
   const router = useRouter();
   const supabase = useMemo(() => createClient(), []);
+
+  // If already authenticated, redirect to dashboard
+  useEffect(() => {
+    supabase.auth.getSession().then(({ data }: any) => {
+      if (data?.session) router.replace('/');
+    });
+  }, [supabase, router]);
 
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();

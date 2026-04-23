@@ -1,30 +1,21 @@
-// Supabase client — uses real Supabase when env vars are set, otherwise falls back to local mock
-import { createClient as createSupabaseClient } from '@supabase/supabase-js';
+// Supabase client — uses @supabase/ssr for cookie-based sessions (works with middleware)
+import { createBrowserClient } from '@supabase/ssr';
 
 const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL;
 const SUPABASE_ANON_KEY = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
-
-// Detect if running in cloud mode (Vercel / production)
 const IS_CLOUD = !!(SUPABASE_URL && SUPABASE_ANON_KEY);
 
-let _client: ReturnType<typeof createSupabaseClient> | null = null;
+let _client: ReturnType<typeof createBrowserClient> | null = null;
 
 export function createClient() {
   if (IS_CLOUD) {
-    // Real Supabase
     if (!_client) {
-      _client = createSupabaseClient(SUPABASE_URL!, SUPABASE_ANON_KEY!, {
-        auth: {
-          persistSession: typeof window !== 'undefined',
-          autoRefreshToken: true,
-        },
-      });
+      _client = createBrowserClient(SUPABASE_URL!, SUPABASE_ANON_KEY!);
     }
     return _client;
   }
 
-  // Fallback to local mock (local dev mode with SQLite only)
-  // This code path is never reached on Vercel since env vars are always set
+  // Fallback to local mock (dev mode with SQLite only)
   // eslint-disable-next-line @typescript-eslint/no-require-imports
   const { createMockClient } = require('./mock-supabase');
   return createMockClient() as any;

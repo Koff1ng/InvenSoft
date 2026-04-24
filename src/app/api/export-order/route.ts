@@ -30,8 +30,16 @@ export async function GET(request: Request) {
 
   if (!order) return NextResponse.json({ error: 'Pedido no encontrado' }, { status: 404 });
 
-  // Items are stored as JSONB in the orders.items column
   const items: any[] = Array.isArray(order.items) ? order.items : [];
+
+  // Group items by category
+  const byCategory: Record<string, any[]> = {};
+  for (const item of items) {
+    const cat = item.category || 'General';
+    if (!byCategory[cat]) byCategory[cat] = [];
+    byCategory[cat].push(item);
+  }
+  const catNames = Object.keys(byCategory);
 
   const wb = new ExcelJS.Workbook();
   wb.creator = 'La Comitiva - Pedidos';
@@ -40,10 +48,12 @@ export async function GET(request: Request) {
   const COLORS = {
     primary: '1B4332', primaryLight: '2D6A4F', accent: '40916C',
     headerFont: 'FFFFFF', oddRow: 'F8F9FA', evenRow: 'FFFFFF', border: 'B7B7B7',
+    catBg: 'E2E8F0', catFont: '334155',
   };
 
   const ws = wb.addWorksheet('Pedido', { properties: { defaultColWidth: 18 } });
 
+  // Title
   ws.mergeCells('A1:E1');
   const title = ws.getCell('A1');
   title.value = 'Pedido — La Comitiva';
@@ -52,11 +62,11 @@ export async function GET(request: Request) {
   title.alignment = { horizontal: 'center', vertical: 'middle' };
   ws.getRow(1).height = 42;
 
+  // Info
   ws.mergeCells('A2:E2');
   const sub = ws.getCell('A2');
-  const catLabel = order.category ? `  |  Categoría: ${order.category}` : '';
   const sedeLabel = order.sede?.name ? `  |  Sede: ${order.sede.name}` : '';
-  sub.value = `Área: ${order.area?.name || '—'}${sedeLabel}  |  Creado por: ${order.creator?.full_name || '—'}${catLabel}`;
+  sub.value = `Área: ${order.area?.name || '—'}${sedeLabel}  |  Creado por: ${order.creator?.full_name || '—'}`;
   sub.font = { name: 'Calibri', size: 11, color: { argb: COLORS.headerFont } };
   sub.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: COLORS.primaryLight } };
   sub.alignment = { horizontal: 'center', vertical: 'middle' };
@@ -74,6 +84,7 @@ export async function GET(request: Request) {
 
   ws.getRow(4).height = 8;
 
+  // Column headers
   const headers = ['#', 'Producto', 'Cantidad', 'Unidad', 'Notas'];
   const hRow = ws.getRow(5);
   headers.forEach((h, i) => {
@@ -86,30 +97,54 @@ export async function GET(request: Request) {
   });
   hRow.height = 28;
 
-  items.forEach((item: any, j: number) => {
-    const row = ws.getRow(j + 6);
-    const isOdd = j % 2 === 0;
-    const vals = [j + 1, item.product_name || '', Number(item.quantity) || 0, item.unit || '', item.notes || ''];
-    vals.forEach((val, i) => {
-      const cell = row.getCell(i + 1);
-      cell.value = val;
-      cell.font = { name: 'Calibri', size: 10 };
-      cell.alignment = { vertical: 'middle', wrapText: i === 4 };
-      cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: isOdd ? COLORS.oddRow : COLORS.evenRow } };
-      cell.border = { bottom: { style: 'thin', color: { argb: COLORS.border } } };
-      if (i === 0 || i === 2 || i === 3) cell.alignment = { horizontal: 'center', vertical: 'middle' };
-      if (i === 2) cell.numFmt = '#,##0.##';
-    });
-    row.height = 22;
-  });
+  let rowIdx = 6;
+  let itemNum = 1;
 
-  const footerRow = items.length + 7;
-  ws.mergeCells(`A${footerRow}:E${footerRow}`);
-  const footer = ws.getCell(`A${footerRow}`);
-  footer.value = `Total: ${items.length} ${items.length === 1 ? 'producto' : 'productos'}`;
+  for (const catName of catNames) {
+    const catItems = byCategory[catName];
+
+    // Category header row
+    ws.mergeCells(`A${rowIdx}:E${rowIdx}`);
+    const catCell = ws.getRow(rowIdx).getCell(1);
+    catCell.value = `${catName}  (${catItems.length} productos)`;
+    catCell.font = { name: 'Calibri', size: 11, bold: true, color: { argb: COLORS.catFont } };
+    catCell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: COLORS.catBg } };
+    catCell.alignment = { vertical: 'middle' };
+    ws.getRow(rowIdx).height = 26;
+    rowIdx++;
+
+    catItems.forEach((item: any, j: number) => {
+      const row = ws.getRow(rowIdx);
+      const isOdd = j % 2 === 0;
+      const vals = [itemNum, item.product_name || '', Number(item.quantity) || 0, item.unit || '', item.notes || ''];
+      vals.forEach((val, i) => {
+        const cell = row.getCell(i + 1);
+        cell.value = val;
+        cell.font = { name: 'Calibri', size: 10 };
+        cell.alignment = { vertical: 'middle', wrapText: i === 4 };
+        cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: isOdd ? COLORS.oddRow : COLORS.evenRow } };
+        cell.border = { bottom: { style: 'thin', color: { argb: COLORS.border } } };
+        if (i === 0 || i === 2 || i === 3) cell.alignment = { horizontal: 'center', vertical: 'middle' };
+        if (i === 2) cell.numFmt = '#,##0.##';
+      });
+      row.height = 22;
+      rowIdx++;
+      itemNum++;
+    });
+
+    // Small spacer between categories
+    ws.getRow(rowIdx).height = 6;
+    rowIdx++;
+  }
+
+  // Footer
+  rowIdx++;
+  ws.mergeCells(`A${rowIdx}:E${rowIdx}`);
+  const footer = ws.getCell(`A${rowIdx}`);
+  footer.value = `Total: ${items.length} productos en ${catNames.length} ${catNames.length === 1 ? 'categoría' : 'categorías'}`;
   footer.font = { name: 'Calibri', size: 10, italic: true, color: { argb: COLORS.primaryLight } };
   footer.alignment = { horizontal: 'center', vertical: 'middle' };
-  ws.getRow(footerRow).height = 28;
+  ws.getRow(rowIdx).height = 28;
 
   ws.getColumn(1).width = 6; ws.getColumn(2).width = 30; ws.getColumn(3).width = 12;
   ws.getColumn(4).width = 14; ws.getColumn(5).width = 28;

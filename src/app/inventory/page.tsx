@@ -5,6 +5,7 @@ import { createClient } from '@/lib/supabase-client';
 import type { Profile, InventoryItem, Area } from '@/lib/types';
 import Navbar from '@/components/Navbar';
 import Link from 'next/link';
+import { useToastAndConfirm } from '@/components/ui/ToastAndConfirm';
 
 interface Sede { id: string; name: string; }
 
@@ -14,6 +15,7 @@ type SortDir = 'asc' | 'desc';
 
 export default function InventoryPage() {
   const supabase = useMemo(() => createClient(), []);
+  const { askConfirm, showToast } = useToastAndConfirm();
   const [profile, setProfile] = useState<Profile | null>(null);
   const [items, setItems] = useState<InventoryItem[]>([]);
   const [areas, setAreas] = useState<Area[]>([]);
@@ -297,9 +299,11 @@ export default function InventoryPage() {
   };
 
   const deleteItem = async (itemId: string, productId: string) => {
-    if (!confirm('¿Eliminar este producto del inventario?')) return;
+    const isConfirmed = await askConfirm('¿Eliminar este producto del inventario?');
+    if (!isConfirmed) return;
     await supabase.from('inventory_items').delete().eq('id', itemId);
     await supabase.from('products').delete().eq('id', productId);
+    showToast('Producto eliminado', 'success');
     loadData();
   };
 

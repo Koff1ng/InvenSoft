@@ -4,6 +4,7 @@ import { useEffect, useState, useCallback, useMemo } from 'react';
 import { createClient } from '@/lib/supabase-client';
 import type { Profile, InventoryItem, Area } from '@/lib/types';
 import Navbar from '@/components/Navbar';
+import { useToastAndConfirm } from '@/components/ui/ToastAndConfirm';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 
@@ -36,6 +37,7 @@ function timeAgo(dateStr: string): string {
 export default function DashboardPage() {
   const supabase = useMemo(() => createClient(), []);
   const router = useRouter();
+  const { showToast } = useToastAndConfirm();
   const [profile, setProfile] = useState<Profile | null>(null);
   const [allItems, setAllItems] = useState<InventoryItem[]>([]);
   const [areas, setAreas] = useState<Area[]>([]);
@@ -231,7 +233,7 @@ export default function DashboardPage() {
   const exportExcel = async () => {
     try {
       const res = await fetch('/api/export');
-      if (!res.ok) { alert('Error al exportar'); return; }
+      if (!res.ok) { showToast('Error al exportar', 'error'); return; }
       const blob = await res.blob();
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
@@ -242,7 +244,7 @@ export default function DashboardPage() {
       document.body.removeChild(a);
       URL.revokeObjectURL(url);
     } catch (err) {
-      alert('Error al exportar el archivo');
+      showToast('Error al exportar el archivo', 'error');
     }
   };
 

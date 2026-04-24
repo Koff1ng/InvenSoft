@@ -4,6 +4,7 @@ import { useEffect, useState, useCallback, useMemo } from 'react';
 import { createClient } from '@/lib/supabase-client';
 import type { Area, UserRole } from '@/lib/types';
 import Navbar from '@/components/Navbar';
+import { useToastAndConfirm } from '@/components/ui/ToastAndConfirm';
 import { useRouter } from 'next/navigation';
 
 interface UserEntry {
@@ -33,6 +34,7 @@ function getInitials(name: string) {
 
 export default function UsersPage() {
   const supabase = useMemo(() => createClient(), []);
+  const { showToast } = useToastAndConfirm();
   const router = useRouter();
   const [users, setUsers] = useState<UserEntry[]>([]);
   const [areas, setAreas] = useState<Area[]>([]);
@@ -155,8 +157,8 @@ export default function UsersPage() {
       .from('profiles')
       .delete()
       .eq('id', deleteTarget.id);
-    if (error) { alert(error.message); }
-    else { loadUsers(); }
+    if (error) { showToast(error.message, 'error'); }
+    else { loadUsers(); showToast('Usuario eliminado', 'success'); }
     setDeleteTarget(null);
   };
 

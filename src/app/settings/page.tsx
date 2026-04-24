@@ -4,11 +4,13 @@ import { useState, useEffect, useCallback, useMemo } from 'react';
 import { createClient } from '@/lib/supabase-client';
 import type { Profile } from '@/lib/types';
 import Navbar from '@/components/Navbar';
+import { useToastAndConfirm } from '@/components/ui/ToastAndConfirm';
 
 interface Sede { id: string; name: string; }
 
 export default function SettingsPage() {
   const supabase = useMemo(() => createClient(), []);
+  const { askConfirm, showToast } = useToastAndConfirm();
   const [profile, setProfile] = useState<Profile | null>(null);
   const [newPassword, setNewPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
@@ -66,8 +68,11 @@ export default function SettingsPage() {
   };
 
   const removeSede = async (id: string, name: string) => {
-    if (!confirm(`¿Eliminar la sede "${name}"? Se perderán todos los productos e inventario asociados.`)) return;
-    await supabase.from('sedes').delete().eq('id', id);
+    const isConfirmed = await askConfirm(`¿Eliminar la sede "${name}"? Se perderán todos los productos e inventario asociados.`);
+    if (!isConfirmed) return;
+    const { error } = await supabase.from('sedes').delete().eq('id', id);
+    if (error) showToast(error.message, 'error');
+    else showToast('Sede eliminada', 'success');
     await loadSedes();
   };
 

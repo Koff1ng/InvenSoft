@@ -4,6 +4,7 @@ import { useEffect, useState, useCallback, useRef, useMemo } from 'react';
 import { createClient } from '@/lib/supabase-client';
 import type { Profile, Area } from '@/lib/types';
 import Navbar from '@/components/Navbar';
+import { useToastAndConfirm } from '@/components/ui/ToastAndConfirm';
 
 interface Sede { id: string; name: string; }
 
@@ -43,6 +44,7 @@ function emptyItem(): OrderItem {
 
 export default function OrdersPage() {
   const supabase = useMemo(() => createClient(), []);
+  const { askConfirm, showToast } = useToastAndConfirm();
   const [profile, setProfile] = useState<Profile | null>(null);
   const [areas, setAreas] = useState<Area[]>([]);
   const [orders, setOrders] = useState<Order[]>([]);
@@ -229,7 +231,8 @@ export default function OrdersPage() {
 
   // ── Delete order ──
   const deleteOrder = async (id: string) => {
-    if (!confirm('¿Eliminar este pedido?')) return;
+    const isConfirmed = await askConfirm('¿Eliminar este pedido?');
+    if (!isConfirmed) return;
     await supabase.from('orders').delete().eq('id', id);
     loadOrders();
     if (detailOrder?.id === id) setDetailOrder(null);
@@ -237,8 +240,10 @@ export default function OrdersPage() {
 
   // ── Approve order ──
   const approveOrder = async (id: string) => {
-    if (!confirm('¿Aprobar este pedido?')) return;
+    const isConfirmed = await askConfirm('¿Aprobar este pedido?');
+    if (!isConfirmed) return;
     await supabase.from('orders').update({ status: 'aprobado' }).eq('id', id);
+    showToast('Pedido aprobado correctamente', 'success');
     loadOrders();
     if (detailOrder?.id === id) setDetailOrder({ ...detailOrder, status: 'aprobado' });
   };
@@ -253,7 +258,7 @@ export default function OrdersPage() {
   const exportOrder = async (id: string) => {
     try {
       const res = await fetch(`/api/export-order?id=${id}`);
-      if (!res.ok) { alert('Error al exportar'); return; }
+      if (!res.ok) { showToast('Error al exportar', 'error'); return; }
       const blob = await res.blob();
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
@@ -263,7 +268,7 @@ export default function OrdersPage() {
       a.click();
       document.body.removeChild(a);
       URL.revokeObjectURL(url);
-    } catch { alert('Error al exportar'); }
+    } catch { showToast('Error al exportar', 'error'); }
   };
 
   // Group items by category for detail view

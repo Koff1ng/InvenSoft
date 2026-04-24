@@ -63,7 +63,7 @@ export default function Navbar() {
         <div className="max-w-6xl mx-auto flex items-center justify-between gap-4">
           <div className="flex items-center gap-6">
             <Link href="/" className="flex items-center gap-2.5 shrink-0">
-              <Image src="/logo_white.svg" alt="La Comitiva" width={44} height={44} style={{ height: 'auto' }} className="rounded" />
+              <Image src="/logo_white.svg" alt="La Comitiva" width={64} height={64} style={{ height: 'auto' }} className="rounded" />
             </Link>
 
             {/* Desktop links */}
@@ -121,7 +121,7 @@ export default function Navbar() {
             onClick={e => e.stopPropagation()}>
             <div className="flex items-center justify-between p-4 border-b border-[var(--border)]">
               <div className="flex items-center gap-2">
-                <Image src="/logo_white.svg" alt="La Comitiva" width={36} height={36} style={{ height: 'auto' }} className="rounded" />
+                <Image src="/logo_white.svg" alt="La Comitiva" width={48} height={48} style={{ height: 'auto' }} className="rounded" />
                 {profile && (
                   <span className="text-[11px] font-medium text-[var(--text-subtle)] bg-[var(--bg-hover)] px-2 py-0.5 rounded-full uppercase tracking-wider">
                     {roleLabels[profile.role] || profile.role}

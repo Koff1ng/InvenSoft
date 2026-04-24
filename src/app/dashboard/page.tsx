@@ -123,11 +123,18 @@ export default function DashboardPage() {
     }
 
     // 2. Orders (last 15)
-    const { data: rawOrders } = await supabase
+    let ordersQuery = supabase
       .from('orders')
       .select('id, category, status, created_at, created_by, area_id, items')
-      .order('created_at', { ascending: false })
-      .limit(15);
+      .order('created_at', { ascending: false });
+
+    if (prof.role !== 'admin' && prof.area_id) {
+      ordersQuery = ordersQuery.eq('area_id', prof.area_id);
+    } else if (prof.role === 'admin') {
+      ordersQuery = ordersQuery.neq('status', 'borrador');
+    }
+
+    const { data: rawOrders } = await ordersQuery.limit(15);
 
     if (rawOrders?.length) {
       const creatorIds = [...new Set(rawOrders.map((o: any) => o.created_by).filter(Boolean))];
@@ -143,7 +150,7 @@ export default function DashboardPage() {
         const creator: any = cMap.get(o.created_by);
         const area: any = oaMap.get(o.area_id);
         const itemCount = Array.isArray(o.items) ? o.items.length : 0;
-        const statusLabel = o.status === 'enviado' ? '✓ Enviado' : '⏳ Borrador';
+        const statusLabel = o.status === 'aprobado' ? '✅ Aprobado' : o.status === 'enviado' ? '✓ Enviado' : '⏳ Borrador';
         feedItems.push({
           id: `ord-${o.id}`,
           type: 'order',
@@ -152,7 +159,7 @@ export default function DashboardPage() {
           title: `Pedido: ${o.category || 'General'} (${itemCount} productos)`,
           detail: statusLabel,
           area: area?.name || '',
-          color: o.status === 'enviado' ? '#22c55e' : '#eab308',
+          color: o.status === 'aprobado' ? '#3b82f6' : o.status === 'enviado' ? '#22c55e' : '#eab308',
         });
       });
       setOrderCount(rawOrders.length);

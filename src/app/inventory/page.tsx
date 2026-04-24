@@ -264,7 +264,11 @@ export default function InventoryPage() {
             <h1 className="text-xl font-semibold">Inventario</h1>
             <p className="text-[var(--text-muted)] text-xs mt-0.5">{areaName}</p>
           </div>
-          <div className="flex gap-2">
+          <div className="flex gap-2 flex-wrap">
+            <Link href="/inventory/count" className="btn-secondary flex items-center gap-1.5 text-xs py-2 px-3">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M9 11l3 3L22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/></svg>
+              Conteo físico
+            </Link>
             <Link href="/inventory/import" className="btn-secondary flex items-center gap-1.5 text-xs py-2 px-3">
               <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
               Importar
@@ -363,7 +367,70 @@ export default function InventoryPage() {
           </div>
         ) : (
           <>
-            <div className="overflow-x-auto">
+            {/* ── MOBILE CARDS (sm and below) ── */}
+            <div className="sm:hidden space-y-2">
+              {displayItems.map((item) => (
+                <div key={item.id} className="bg-[var(--bg-card)] border border-[var(--border)] rounded-lg p-3">
+                  <div className="flex items-start justify-between mb-2">
+                    <div className="min-w-0 flex-1">
+                      <p className="font-medium text-sm">{item.product?.name}</p>
+                      <div className="flex items-center gap-2 mt-1">
+                        {profile?.role === 'admin' && item.area?.name && (
+                          <span className="text-xs bg-[var(--bg-input)] px-1.5 py-0.5 rounded">{item.area.name}</span>
+                        )}
+                        {item.product?.category && (
+                          <span className="text-xs text-[var(--text-muted)]">{item.product.category}</span>
+                        )}
+                      </div>
+                    </div>
+                    <div className="text-right shrink-0 ml-3">
+                      {editingId === item.id ? (
+                        <input type="number" value={editQty} onChange={(e) => setEditQty(e.target.value)}
+                          className="input-field w-20 text-sm text-center" min="0" step="0.1" />
+                      ) : (
+                        <p className={`text-lg font-bold ${item.quantity <= 5 ? 'text-[var(--danger)]' : ''}`}>
+                          {item.quantity} <span className="text-xs font-normal text-[var(--text-muted)]">{item.product?.unit}</span>
+                        </p>
+                      )}
+                    </div>
+                  </div>
+
+                  {editingId === item.id && (
+                    <div className="mb-2">
+                      <input type="text" value={editNotes} onChange={(e) => { setEditNotes(e.target.value); setEditError(''); }}
+                        className={`input-field text-xs w-full ${editError ? 'border-red-400' : ''}`} placeholder="Motivo del ajuste *" />
+                      {editError && <p className="text-xs text-red-400 mt-1">{editError}</p>}
+                    </div>
+                  )}
+
+                  <div className="flex items-center justify-between">
+                    <p className="text-xs text-[var(--text-muted)]">
+                      {new Date(item.updated_at).toLocaleDateString('es-CO', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' })}
+                    </p>
+                    <div className="flex gap-1.5">
+                      {editingId === item.id ? (
+                        <>
+                          <button onClick={() => saveEdit(item)} className="btn-primary text-xs py-1 px-2">Guardar</button>
+                          <button onClick={() => setEditingId(null)} className="btn-secondary text-xs py-1 px-2">Cancelar</button>
+                        </>
+                      ) : (
+                        <>
+                          <button onClick={() => startEdit(item)} className="p-1.5 rounded-md border border-[var(--border)] text-[var(--text-muted)]" title="Ajustar">
+                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="4" y="2" width="16" height="20" rx="2"/><line x1="8" y1="10" x2="16" y2="10"/><line x1="8" y1="14" x2="16" y2="14"/><line x1="8" y1="6" x2="16" y2="6"/></svg>
+                          </button>
+                          <button onClick={() => deleteItem(item.id, item.product_id)} className="p-1.5 rounded-md border border-red-400/20 text-red-400" title="Eliminar">
+                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>
+                          </button>
+                        </>
+                      )}
+                    </div>
+                  </div>
+                </div>
+              ))}
+            </div>
+
+            {/* ── DESKTOP TABLE (md+) ── */}
+            <div className="overflow-x-auto hidden sm:block">
               <table className="w-full border-collapse">
                 <thead>
                   <tr className="border-b border-[var(--border)] text-left text-sm text-[var(--text-muted)]">

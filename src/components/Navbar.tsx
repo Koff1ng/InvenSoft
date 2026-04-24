@@ -41,11 +41,13 @@ export default function Navbar() {
   const navLinks = [
     ...(profile?.role === 'admin' ? [
       { href: '/dashboard', label: 'Dashboard' },
-      { href: '/inventory', label: 'Inventario' },
-      { href: '/users', label: 'Equipo' },
     ] : []),
+    { href: '/inventory', label: 'Inventario' },
     { href: '/orders', label: 'Pedidos' },
     { href: '/history', label: 'Historial' },
+    ...(profile?.role === 'admin' ? [
+      { href: '/users', label: 'Equipo' },
+    ] : []),
     { href: '/settings', label: 'Ajustes' },
   ];
 

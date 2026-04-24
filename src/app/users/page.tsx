@@ -66,7 +66,7 @@ export default function UsersPage() {
         role: p.role,
         area_id: p.area_id,
         area: p.area,
-        username: '', // email is in auth, not in profiles
+        username: p.username || '',
         created_at: p.created_at,
       })));
     }
@@ -111,38 +111,37 @@ export default function UsersPage() {
     setFormError('');
 
     if (editingUser) {
-      // Update profile in Supabase
+      // Update profile
       const updates: Record<string, unknown> = {
         full_name: fullName,
         role,
         area_id: role === 'admin' ? null : areaId || null,
       };
+      if (username.trim()) updates.username = username.trim();
       const { error } = await supabase
         .from('profiles')
         .update(updates)
         .eq('id', editingUser.id);
       if (error) { setFormError(error.message); setFormLoading(false); return; }
     } else {
-      // Create new user via Supabase Auth signUp
-      const email = username.trim();
-      if (!email.includes('@')) { setFormError('Usa un correo electrónico válido (ej: nombre@lacomitiva.co)'); setFormLoading(false); return; }
+      // Create via server API (no session hijack)
+      if (!username.trim()) { setFormError('Ingresa un usuario o correo'); setFormLoading(false); return; }
       if (!password || password.length < 6) { setFormError('La contraseña debe tener al menos 6 caracteres'); setFormLoading(false); return; }
 
-      const { data: signUpData, error: signUpError } = await supabase.auth.signUp({
-        email,
-        password,
+      const res = await fetch('/api/users', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          username: username.trim(),
+          password,
+          full_name: fullName || username.trim(),
+          role,
+          area_id: role === 'admin' ? null : areaId || null,
+        }),
       });
-      if (signUpError) { setFormError(signUpError.message); setFormLoading(false); return; }
-      if (!signUpData.user) { setFormError('No se pudo crear el usuario'); setFormLoading(false); return; }
 
-      // Insert profile
-      const { error: profileError } = await supabase.from('profiles').insert({
-        id: signUpData.user.id,
-        full_name: fullName || email.split('@')[0],
-        role,
-        area_id: role === 'admin' ? null : areaId || null,
-      });
-      if (profileError) { setFormError(profileError.message); setFormLoading(false); return; }
+      const data = await res.json();
+      if (!res.ok) { setFormError(data.error || 'Error al crear usuario'); setFormLoading(false); return; }
     }
 
     resetForm();
@@ -301,17 +300,20 @@ export default function UsersPage() {
               <div className="space-y-4">
                 <div>
                   <label className="block text-xs font-medium text-[var(--text-muted)] uppercase tracking-wider mb-1.5">
-                    Correo electrónico
+                    Usuario o correo
                   </label>
                   <input
-                    type="email"
+                    type="text"
                     value={username}
                     onChange={e => setUsername(e.target.value)}
                     className="input-field"
-                    placeholder="nombre@lacomitiva.co"
+                    placeholder="ej: juanperez o juan@email.com"
                     required={!editingUser}
                     autoFocus={!editingUser}
                   />
+                  {!editingUser && (
+                    <p className="text-xs text-[var(--text-muted)] mt-1">Puede ser un nombre de usuario simple o un correo</p>
+                  )}
                 </div>
                 <div>
                   <label className="block text-xs font-medium text-[var(--text-muted)] uppercase tracking-wider mb-1.5">

@@ -28,8 +28,11 @@ export default function LoginPage() {
     setLoading(true);
 
     try {
+      // If username doesn't contain @, append fake domain
+      const authEmail = email.includes('@') ? email : `${email.toLowerCase().replace(/\s+/g, '')}@lacomitiva.local`;
+
       const { error, data } = await supabase.auth.signInWithPassword({
-        email,
+        email: authEmail,
         password,
       });
 
@@ -135,15 +138,15 @@ export default function LoginPage() {
           <form onSubmit={handleLogin} className="space-y-4">
             <div>
               <label htmlFor="email" className="block text-sm font-medium mb-1">
-                Correo electrónico
+                Usuario o correo
               </label>
               <input
                 id="email"
-                type="email"
+                type="text"
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
                 className="input-field"
-                placeholder="usuario@lacomitiva.co"
+                placeholder="usuario o correo@ejemplo.com"
                 required
               />
             </div>
@@ -188,10 +191,9 @@ export default function LoginPage() {
         )}
 
         <div className="mt-8 border-t border-[var(--border)] pt-6">
-          <p className="text-[11px] text-[var(--text-subtle)] font-medium mb-2 uppercase tracking-wider">Demo</p>
+          <p className="text-[11px] text-[var(--text-subtle)] font-medium mb-2 uppercase tracking-wider">Acceso</p>
           <div className="text-xs text-[var(--text-muted)] space-y-0.5">
-            <p>admin · servicio · cocina · bar <span className="text-[var(--text-subtle)]">@lacomitiva.co</span></p>
-            <p className="text-[var(--text-subtle)]">Contraseña: demo1234</p>
+            <p>Ingresa tu <span className="text-[var(--text-subtle)]">usuario o correo</span> y contraseña</p>
           </div>
         </div>
       </div>

@@ -64,9 +64,12 @@ export default function InventoryPage() {
     const p = prof ?? profile;
     if (!p) return;
 
+    // Use !inner join when searching to prevent null product relations
+    const productJoin = search.trim() ? 'product:products!inner(*)' : 'product:products(*)';
+
     let query = supabase
       .from('inventory_items')
-      .select('*, product:products(*), area:areas(*)', { count: 'exact' });
+      .select(`*, ${productJoin}, area:areas(*)`, { count: 'exact' });
 
     // Area filter
     if (p.role !== 'admin') {

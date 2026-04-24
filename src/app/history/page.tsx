@@ -50,10 +50,15 @@ export default function HistoryPage() {
     let query = supabase
       .from('inventory_updates')
       .select(
-        'id, previous_qty, new_qty, updated_at, notes, updated_by, inventory_item_id',
+        'id, previous_qty, new_qty, updated_at, notes, updated_by, inventory_item_id, inventory_items!inner(area_id)',
         { count: 'exact' }
       )
       .order('updated_at', { ascending: false });
+
+    // Restrict by area if not admin
+    if (prof.role !== 'admin' && prof.area_id) {
+      query = query.eq('inventory_items.area_id', prof.area_id);
+    }
 
     if (dateFrom) query = query.gte('updated_at', new Date(dateFrom).toISOString());
     if (dateTo) {

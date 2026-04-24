@@ -199,8 +199,8 @@ export default function UsersPage() {
 
         {/* Users Grid */}
         <div className="space-y-2">
-          {/* Table header */}
-          <div className="grid grid-cols-[1fr_120px_100px_100px_80px] gap-3 px-4 py-2 text-xs font-medium text-[var(--text-muted)] uppercase tracking-wider">
+          {/* Table header — desktop only */}
+          <div className="hidden md:grid grid-cols-[1fr_120px_100px_100px_80px] gap-3 px-4 py-2 text-xs font-medium text-[var(--text-muted)] uppercase tracking-wider">
             <span>Miembro</span>
             <span>Rol</span>
             <span>Área</span>
@@ -213,7 +213,7 @@ export default function UsersPage() {
             return (
               <div
                 key={u.id}
-                className="grid grid-cols-[1fr_120px_100px_100px_80px] gap-3 items-center px-4 py-3 rounded-lg bg-[var(--bg-card)] border border-[var(--border)] hover:border-[var(--primary)] transition-colors group"
+                className="flex flex-col sm:grid sm:grid-cols-[1fr_120px_100px_100px_80px] gap-2 sm:gap-3 sm:items-center px-4 py-3 rounded-lg bg-[var(--bg-card)] border border-[var(--border)] hover:border-[var(--primary)] transition-colors group"
               >
                 {/* Avatar + info */}
                 <div className="flex items-center gap-3 min-w-0">
@@ -223,46 +223,50 @@ export default function UsersPage() {
                   >
                     {getInitials(u.full_name)}
                   </div>
-                  <div className="min-w-0">
+                  <div className="min-w-0 flex-1">
                     <p className="font-medium text-sm truncate">{u.full_name}</p>
                     <p className="text-xs text-[var(--text-muted)] truncate">
                       {u.username || '—'}
                     </p>
                   </div>
+                  {/* Mobile actions */}
+                  <div className="flex items-center gap-1 sm:hidden">
+                    <button onClick={() => openEdit(u)} className="p-1.5 rounded-md hover:bg-[var(--bg-input)] text-[var(--text-muted)]" title="Editar">
+                      <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
+                    </button>
+                    <button onClick={() => setDeleteTarget(u)} className="p-1.5 rounded-md hover:bg-red-500/10 text-[var(--text-muted)] hover:text-red-400" title="Eliminar">
+                      <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>
+                    </button>
+                  </div>
                 </div>
 
-                {/* Role badge */}
-                <span
-                  className="inline-flex items-center gap-1 text-xs font-medium px-2.5 py-1 rounded-full w-fit"
-                  style={{ backgroundColor: `${rm.color}18`, color: rm.color }}
-                >
+                {/* Mobile: role + area inline */}
+                <div className="flex items-center gap-2 sm:hidden pl-12">
+                  <span className="inline-flex items-center gap-1 text-xs font-medium px-2 py-0.5 rounded-full" style={{ backgroundColor: `${rm.color}18`, color: rm.color }}>
+                    {rm.icon} {rm.label}
+                  </span>
+                  {u.area?.name && <span className="text-xs text-[var(--text-muted)]">{u.area.name}</span>}
+                </div>
+
+                {/* Desktop: Role badge */}
+                <span className="hidden sm:inline-flex items-center gap-1 text-xs font-medium px-2.5 py-1 rounded-full w-fit" style={{ backgroundColor: `${rm.color}18`, color: rm.color }}>
                   {rm.icon} {rm.label}
                 </span>
 
-                {/* Area */}
-                <span className="text-sm text-[var(--text-muted)]">
-                  {u.area?.name || '—'}
-                </span>
+                {/* Desktop: Area */}
+                <span className="hidden sm:inline text-sm text-[var(--text-muted)]">{u.area?.name || '—'}</span>
 
-                {/* Date */}
-                <span className="text-xs text-[var(--text-muted)]">
+                {/* Desktop: Date */}
+                <span className="hidden sm:inline text-xs text-[var(--text-muted)]">
                   {new Date(u.created_at).toLocaleDateString('es-CO', { day: '2-digit', month: 'short' })}
                 </span>
 
-                {/* Actions */}
-                <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-                  <button
-                    onClick={() => openEdit(u)}
-                    className="p-1.5 rounded-md hover:bg-[var(--bg-input)] text-[var(--text-muted)] hover:text-[var(--text)]"
-                    title="Editar"
-                  >
+                {/* Desktop: Actions */}
+                <div className="hidden sm:flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                  <button onClick={() => openEdit(u)} className="p-1.5 rounded-md hover:bg-[var(--bg-input)] text-[var(--text-muted)] hover:text-[var(--text)]" title="Editar">
                     <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
                   </button>
-                  <button
-                    onClick={() => setDeleteTarget(u)}
-                    className="p-1.5 rounded-md hover:bg-red-500/10 text-[var(--text-muted)] hover:text-red-400"
-                    title="Eliminar"
-                  >
+                  <button onClick={() => setDeleteTarget(u)} className="p-1.5 rounded-md hover:bg-red-500/10 text-[var(--text-muted)] hover:text-red-400" title="Eliminar">
                     <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>
                   </button>
                 </div>

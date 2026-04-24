@@ -312,7 +312,7 @@ export default function OrdersPage() {
         ) : (
           <div className="space-y-2">
             {filteredOrders.sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime()).map(o => (
-              <div key={o.id} className="flex items-center justify-between px-4 py-3 rounded-lg bg-[var(--bg-card)] border border-[var(--border)] hover:border-[var(--primary)] transition-colors group">
+              <div key={o.id} className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 px-4 py-3 rounded-lg bg-[var(--bg-card)] border border-[var(--border)] hover:border-[var(--primary)] transition-colors group">
                 <div className="flex items-center gap-3 min-w-0">
                   <div className="w-8 h-8 rounded-full flex items-center justify-center shrink-0">
                     {o.status === 'enviado'
@@ -321,18 +321,18 @@ export default function OrdersPage() {
                     }
                   </div>
                   <div className="min-w-0">
-                    <p className="font-medium text-sm">
+                    <p className="font-medium text-sm truncate">
                       {o.category ? `${o.category}` : 'Pedido'} — {o.area?.name || '—'}
                       {o.sede && <span className="text-xs text-[var(--text-muted)] ml-1">({o.sede.name})</span>}
                       <span className="ml-2 text-xs text-[var(--text-muted)]">({Array.isArray(o.items) ? o.items.length : 0} productos)</span>
                     </p>
                     <p className="text-xs text-[var(--text-muted)]">
-                      {o.creator?.full_name || '—'} · {new Date(o.created_at).toLocaleDateString('es-CO', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' })}
+                      {o.creator?.full_name || '—'} · {new Date(o.created_at).toLocaleDateString('es-CO', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' })}
                     </p>
                   </div>
                 </div>
 
-                <div className="flex items-center gap-2">
+                <div className="flex items-center gap-2 pl-11 sm:pl-0">
                   <span className={`text-xs font-medium px-2.5 py-1 rounded-full ${o.status === 'enviado' ? 'bg-green-500/15 text-green-400' : 'bg-yellow-500/15 text-yellow-400'}`}>
                     {o.status === 'enviado' ? 'Enviado' : 'Borrador'}
                   </span>

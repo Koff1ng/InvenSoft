@@ -155,3 +155,37 @@ a, button, input, select, textarea {
   outline: 2px solid var(--accent);
   outline-offset: 2px;
 }
+
+/* ─── Mobile-specific improvements ─── */
+@media (max-width: 640px) {
+  /* Prevent zoom on iOS inputs */
+  input, select, textarea {
+    font-size: 16px !important;
+  }
+
+  /* Better card padding on mobile */
+  .card {
+    padding: 1rem;
+  }
+
+  /* Ensure touch targets are at least 44px */
+  button, a {
+    min-height: 36px;
+  }
+
+  /* Safe area insets for notched phones */
+  body {
+    padding-bottom: env(safe-area-inset-bottom);
+  }
+}
+
+/* ─── Smooth scrolling ─── */
+html {
+  scroll-behavior: smooth;
+  -webkit-text-size-adjust: 100%;
+}
+
+/* ─── Prevent horizontal scroll on mobile ─── */
+body {
+  overflow-x: hidden;
+}

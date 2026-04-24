@@ -435,8 +435,35 @@ export default function DashboardPage() {
           </span>
         </div>
 
-        {/* Table */}
-        <div className="overflow-x-auto">
+        {/* ── MOBILE CARDS ── */}
+        <div className="sm:hidden space-y-2">
+          {paged.map((item) => (
+            <div key={item.id} className="bg-[var(--bg-card)] border border-[var(--border)] rounded-lg p-3">
+              <div className="flex items-start justify-between mb-1">
+                <div className="min-w-0 flex-1">
+                  <p className="font-medium text-sm truncate">{item.product?.name}</p>
+                  <div className="flex items-center gap-2 mt-0.5">
+                    <span className="text-xs bg-[var(--bg-input)] px-1.5 py-0.5 rounded">{item.area?.name}</span>
+                    {item.product?.category && <span className="text-xs text-[var(--text-muted)]">{item.product.category}</span>}
+                  </div>
+                </div>
+                <div className="text-right shrink-0 ml-3">
+                  <span className={`text-base font-bold ${item.quantity <= 5 ? 'text-[var(--danger)]' : ''}`}>
+                    {item.quantity}
+                  </span>
+                  <p className="text-xs text-[var(--text-muted)]">{item.product?.unit}</p>
+                </div>
+              </div>
+              <div className="flex items-center justify-between text-xs text-[var(--text-muted)]">
+                <span>{new Date(item.updated_at).toLocaleDateString('es-CO', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' })}</span>
+                {item.product?.notes && <span className="truncate max-w-[50%]">📝 {item.product.notes}</span>}
+              </div>
+            </div>
+          ))}
+        </div>
+
+        {/* ── DESKTOP TABLE ── */}
+        <div className="overflow-x-auto hidden sm:block">
           <table className="w-full border-collapse">
             <thead>
               <tr className="border-b border-[var(--border)] text-left text-sm text-[var(--text-muted)]">

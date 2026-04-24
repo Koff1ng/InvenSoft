@@ -64,8 +64,9 @@ export default function InventoryPage() {
     const p = prof ?? profile;
     if (!p) return;
 
-    // Use !inner join when searching to prevent null product relations
-    const productJoin = search.trim() ? 'product:products!inner(*)' : 'product:products(*)';
+    // Use !inner join when searching or filtering category to prevent null product relations
+    const needsInner = !!search.trim() || filterCategory !== 'all';
+    const productJoin = needsInner ? 'product:products!inner(*)' : 'product:products(*)';
 
     let query = supabase
       .from('inventory_items')
@@ -83,9 +84,9 @@ export default function InventoryPage() {
       query = query.eq('sede_id', filterSede);
     }
 
-    // Category filter (server-side)
+    // Category filter (on products table)
     if (filterCategory !== 'all') {
-      query = query.eq('category', filterCategory);
+      query = query.eq('product.category', filterCategory);
     }
 
 
@@ -214,20 +215,85 @@ export default function InventoryPage() {
 
     setTransferLoading(true);
     const { data: { user } } = await supabase.auth.getUser();
-    if (!user) return;
+    if (!user) { setTransferLoading(false); return; }
 
-    const { error } = await supabase.from('inventory_transfer').insert({
-      sourceItemId: transferItem.id,
-      targetSedeId: transferSede,
-      quantity: qty,
-      updatedBy: user.id,
-      notes: transferNotes.trim(),
-    });
+    try {
+      const now = new Date().toISOString();
+      const destSedeName = sedes.find(s => s.id === transferSede)?.name || 'otra sede';
+      const sourceSedeName = sedes.find(s => s.id === transferItem.sede_id)?.name || 'sede origen';
 
-    if (error) { setTransferError(error.message); setTransferLoading(false); return; }
-    setTransferItem(null);
-    setTransferLoading(false);
-    loadData();
+      // 1. Reduce source quantity
+      const newSourceQty = transferItem.quantity - qty;
+      const { error: srcErr } = await supabase.from('inventory_items').update({
+        quantity: newSourceQty, updated_at: now, updated_by: user.id,
+      }).eq('id', transferItem.id);
+
+      if (srcErr) { setTransferError(srcErr.message); setTransferLoading(false); return; }
+
+      // Log source reduction
+      await supabase.from('inventory_updates').insert({
+        inventory_item_id: transferItem.id,
+        previous_qty: transferItem.quantity,
+        new_qty: newSourceQty,
+        updated_by: user.id,
+        notes: `Transferencia a ${destSedeName}: -${qty} ${transferItem.product?.unit || ''} — ${transferNotes.trim()}`,
+      });
+
+      // 2. Find or create destination inventory_item
+      const { data: existingDest } = await supabase
+        .from('inventory_items')
+        .select('id, quantity')
+        .eq('product_id', transferItem.product_id)
+        .eq('area_id', transferItem.area_id)
+        .eq('sede_id', transferSede)
+        .maybeSingle();
+
+      if (existingDest) {
+        // Add to existing
+        const newDestQty = existingDest.quantity + qty;
+        await supabase.from('inventory_items').update({
+          quantity: newDestQty, updated_at: now, updated_by: user.id,
+        }).eq('id', existingDest.id);
+
+        await supabase.from('inventory_updates').insert({
+          inventory_item_id: existingDest.id,
+          previous_qty: existingDest.quantity,
+          new_qty: newDestQty,
+          updated_by: user.id,
+          notes: `Transferencia desde ${sourceSedeName}: +${qty} ${transferItem.product?.unit || ''} — ${transferNotes.trim()}`,
+        });
+      } else {
+        // Create new inventory_item at destination
+        const { data: newItem, error: newErr } = await supabase
+          .from('inventory_items')
+          .insert({
+            product_id: transferItem.product_id,
+            area_id: transferItem.area_id,
+            sede_id: transferSede,
+            quantity: qty,
+            updated_by: user.id,
+          })
+          .select('id')
+          .single();
+
+        if (newErr) { setTransferError(newErr.message); setTransferLoading(false); return; }
+
+        await supabase.from('inventory_updates').insert({
+          inventory_item_id: newItem.id,
+          previous_qty: 0,
+          new_qty: qty,
+          updated_by: user.id,
+          notes: `Transferencia desde ${sourceSedeName}: +${qty} ${transferItem.product?.unit || ''} — ${transferNotes.trim()}`,
+        });
+      }
+
+      setTransferItem(null);
+      setTransferLoading(false);
+      loadData();
+    } catch (err: any) {
+      setTransferError(err.message || 'Error inesperado');
+      setTransferLoading(false);
+    }
   };
 
   const deleteItem = async (itemId: string, productId: string) => {

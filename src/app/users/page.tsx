@@ -55,10 +55,23 @@ export default function UsersPage() {
   const [deleteTarget, setDeleteTarget] = useState<UserEntry | null>(null);
 
   const loadUsers = useCallback(async () => {
-    const res = await fetch('/api/users');
-    if (res.ok) setUsers(await res.json());
+    const { data } = await supabase
+      .from('profiles')
+      .select('*, area:areas(name)')
+      .order('created_at', { ascending: true });
+    if (data) {
+      setUsers(data.map((p: any) => ({
+        id: p.id,
+        full_name: p.full_name,
+        role: p.role,
+        area_id: p.area_id,
+        area: p.area,
+        username: '', // email is in auth, not in profiles
+        created_at: p.created_at,
+      })));
+    }
     setLoading(false);
-  }, []);
+  }, [supabase]);
 
   useEffect(() => {
     const init = async () => {
@@ -98,43 +111,38 @@ export default function UsersPage() {
     setFormError('');
 
     if (editingUser) {
-      const body: Record<string, unknown> = {
-        userId: editingUser.id,
+      // Update profile in Supabase
+      const updates: Record<string, unknown> = {
         full_name: fullName,
         role,
-        area_id: role === 'admin' ? null : areaId,
+        area_id: role === 'admin' ? null : areaId || null,
       };
-      // Only send username if changed
-      if (username.trim() && username.trim() !== editingUser.username) {
-        body.username = username.trim();
-      }
-      // Only send password if filled
-      if (password && password.length >= 6) {
-        body.password = password;
-      }
-      const res = await fetch('/api/users', {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(body),
-      });
-      const data = await res.json();
-      if (!res.ok) { setFormError(data.error); setFormLoading(false); return; }
+      const { error } = await supabase
+        .from('profiles')
+        .update(updates)
+        .eq('id', editingUser.id);
+      if (error) { setFormError(error.message); setFormLoading(false); return; }
     } else {
-      if (!username.trim()) { setFormError('El usuario es requerido'); setFormLoading(false); return; }
+      // Create new user via Supabase Auth signUp
+      const email = username.trim();
+      if (!email.includes('@')) { setFormError('Usa un correo electrónico válido (ej: nombre@lacomitiva.co)'); setFormLoading(false); return; }
       if (!password || password.length < 6) { setFormError('La contraseña debe tener al menos 6 caracteres'); setFormLoading(false); return; }
-      const res = await fetch('/api/users', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          email: username.trim(),
-          password,
-          full_name: fullName,
-          role,
-          area_id: role === 'admin' ? null : areaId,
-        }),
+
+      const { data: signUpData, error: signUpError } = await supabase.auth.signUp({
+        email,
+        password,
       });
-      const data = await res.json();
-      if (!res.ok) { setFormError(data.error); setFormLoading(false); return; }
+      if (signUpError) { setFormError(signUpError.message); setFormLoading(false); return; }
+      if (!signUpData.user) { setFormError('No se pudo crear el usuario'); setFormLoading(false); return; }
+
+      // Insert profile
+      const { error: profileError } = await supabase.from('profiles').insert({
+        id: signUpData.user.id,
+        full_name: fullName || email.split('@')[0],
+        role,
+        area_id: role === 'admin' ? null : areaId || null,
+      });
+      if (profileError) { setFormError(profileError.message); setFormLoading(false); return; }
     }
 
     resetForm();
@@ -144,13 +152,12 @@ export default function UsersPage() {
 
   const confirmDelete = async () => {
     if (!deleteTarget) return;
-    const res = await fetch('/api/users', {
-      method: 'DELETE',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ userId: deleteTarget.id }),
-    });
-    if (res.ok) { loadUsers(); }
-    else { const d = await res.json(); alert(d.error || 'Error al eliminar'); }
+    const { error } = await supabase
+      .from('profiles')
+      .delete()
+      .eq('id', deleteTarget.id);
+    if (error) { alert(error.message); }
+    else { loadUsers(); }
     setDeleteTarget(null);
   };
 
@@ -294,14 +301,14 @@ export default function UsersPage() {
               <div className="space-y-4">
                 <div>
                   <label className="block text-xs font-medium text-[var(--text-muted)] uppercase tracking-wider mb-1.5">
-                    Usuario
+                    Correo electrónico
                   </label>
                   <input
-                    type="text"
+                    type="email"
                     value={username}
                     onChange={e => setUsername(e.target.value)}
                     className="input-field"
-                    placeholder="ej: juan.perez"
+                    placeholder="nombre@lacomitiva.co"
                     required={!editingUser}
                     autoFocus={!editingUser}
                   />

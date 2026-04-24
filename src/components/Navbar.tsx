@@ -1,7 +1,7 @@
 'use client';
 
 import { createClient } from '@/lib/supabase-client';
-import { useRouter } from 'next/navigation';
+import { useRouter, usePathname } from 'next/navigation';
 import Link from 'next/link';
 import Image from 'next/image';
 import type { Profile } from '@/lib/types';
@@ -10,6 +10,7 @@ import { useEffect, useState, useMemo } from 'react';
 export default function Navbar() {
   const supabase = useMemo(() => createClient(), []);
   const router = useRouter();
+  const pathname = usePathname();
   const [profile, setProfile] = useState<Profile | null>(null);
 
   useEffect(() => {
@@ -48,12 +49,14 @@ export default function Navbar() {
     { href: '/settings', label: 'Ajustes' },
   ];
 
+  const isActive = (href: string) => pathname === href || pathname.startsWith(href + '/');
+
   return (
     <nav className="border-b border-[var(--border)] px-4 py-2.5">
       <div className="max-w-6xl mx-auto flex items-center justify-between gap-4">
         <div className="flex items-center gap-6">
           <Link href="/" className="flex items-center gap-2.5 shrink-0">
-            <Image src="/logo_white.svg" alt="La Comitiva" width={28} height={28} className="rounded" />
+            <Image src="/logo_white.svg" alt="La Comitiva" width={28} height={28} style={{ height: 'auto' }} className="rounded" />
           </Link>
 
           <div className="flex items-center gap-1">
@@ -61,7 +64,11 @@ export default function Navbar() {
               <Link
                 key={link.href}
                 href={link.href}
-                className="px-3 py-1.5 text-[13px] text-[var(--text-muted)] hover:text-[var(--text)] hover:bg-[var(--bg-hover)] rounded-lg transition-colors"
+                className={`px-3 py-1.5 text-[13px] rounded-lg transition-colors ${
+                  isActive(link.href)
+                    ? 'text-[var(--text)] bg-[var(--bg-hover)] font-medium'
+                    : 'text-[var(--text-muted)] hover:text-[var(--text)] hover:bg-[var(--bg-hover)]'
+                }`}
               >
                 {link.label}
               </Link>

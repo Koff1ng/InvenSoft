@@ -79,7 +79,7 @@ export default function LoginPage() {
     <div className="min-h-screen flex items-center justify-center px-4">
       <div className="w-full max-w-sm">
         <div className="text-center mb-10">
-          <Image src="/logo_white.svg" alt="La Comitiva" width={72} height={72} className="mx-auto mb-4" />
+          <Image src="/logo_white.svg" alt="La Comitiva" width={140} height={140} className="mx-auto mb-6" />
           <p className="text-[var(--text-muted)] text-sm">
             {forgotMode ? 'Recuperar contraseña' : 'Sistema de Inventarios'}
           </p>

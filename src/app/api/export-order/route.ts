@@ -30,13 +30,8 @@ export async function GET(request: Request) {
 
   if (!order) return NextResponse.json({ error: 'Pedido no encontrado' }, { status: 404 });
 
-  // Get order items
-  const { data: orderItems } = await supabase
-    .from('order_items')
-    .select('*')
-    .eq('order_id', orderId);
-
-  const items = orderItems || (order.items as any[]) || [];
+  // Items are stored as JSONB in the orders.items column
+  const items: any[] = Array.isArray(order.items) ? order.items : [];
 
   const wb = new ExcelJS.Workbook();
   wb.creator = 'La Comitiva - Pedidos';

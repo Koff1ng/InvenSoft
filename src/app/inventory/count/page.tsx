@@ -307,7 +307,7 @@ export default function PhysicalCountPage() {
                     <div key={idx} className="grid grid-cols-[1fr_80px_80px] gap-3 items-center p-3 rounded-lg bg-[var(--bg)] border border-[var(--border)]">
                       <div className="min-w-0">
                         <p className="text-sm font-medium truncate">{item.product_name}</p>
-                        <p className="text-xs text-[var(--text-muted)]">Sistema: {item.system_qty} {item.product_unit}</p>
+                        <p className="text-xs text-[var(--text-muted)]">{item.product_unit}</p>
                       </div>
                       <input
                         type="text"
@@ -321,8 +321,8 @@ export default function PhysicalCountPage() {
                             setCountItems(copy);
                           }
                         }}
-                        className={`input-field text-sm text-center ${item.counted_qty !== '' && parseFloat(item.counted_qty) !== item.system_qty ? 'border-yellow-400' : ''}`}
-                        placeholder="Real"
+                        className="input-field text-sm text-center"
+                        placeholder="Cantidad"
                       />
                       <span className="text-xs text-[var(--text-muted)] text-center">{item.product_unit}</span>
                     </div>
@@ -378,9 +378,9 @@ export default function PhysicalCountPage() {
                     <thead>
                       <tr className="text-left text-xs text-[var(--text-muted)] border-b border-[var(--border)]">
                         <th className="py-2 pr-4">Producto</th>
-                        <th className="py-2 px-4 text-center">Sistema</th>
+                        {profile?.role === 'admin' && <th className="py-2 px-4 text-center">Sistema</th>}
                         <th className="py-2 px-4 text-center">Conteo</th>
-                        <th className="py-2 pl-4 text-center">Diferencia</th>
+                        {profile?.role === 'admin' && <th className="py-2 pl-4 text-center">Diferencia</th>}
                       </tr>
                     </thead>
                     <tbody>
@@ -389,11 +389,13 @@ export default function PhysicalCountPage() {
                         return (
                           <tr key={i} className="border-b border-[var(--border)]">
                             <td className="py-2 pr-4 font-medium">{item.product_name}</td>
-                            <td className="py-2 px-4 text-center text-[var(--text-muted)]">{item.system_qty} {item.product_unit}</td>
+                            {profile?.role === 'admin' && <td className="py-2 px-4 text-center text-[var(--text-muted)]">{item.system_qty} {item.product_unit}</td>}
                             <td className="py-2 px-4 text-center font-semibold">{item.counted_qty} {item.product_unit}</td>
-                            <td className={`py-2 pl-4 text-center font-bold ${diff < 0 ? 'text-red-400' : diff > 0 ? 'text-green-400' : 'text-[var(--text-muted)]'}`}>
-                              {diff > 0 ? '+' : ''}{diff !== 0 ? diff : '—'}
-                            </td>
+                            {profile?.role === 'admin' && (
+                              <td className={`py-2 pl-4 text-center font-bold ${diff < 0 ? 'text-red-400' : diff > 0 ? 'text-green-400' : 'text-[var(--text-muted)]'}`}>
+                                {diff > 0 ? '+' : ''}{diff !== 0 ? diff : '—'}
+                              </td>
+                            )}
                           </tr>
                         );
                       })}

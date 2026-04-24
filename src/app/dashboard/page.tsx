@@ -5,22 +5,21 @@ import { createClient } from '@/lib/supabase-client';
 import type { Profile, InventoryItem, Area } from '@/lib/types';
 import Navbar from '@/components/Navbar';
 import { useRouter } from 'next/navigation';
+import Link from 'next/link';
 
 const PAGE_SIZE = 20;
 type SortField = 'name' | 'quantity' | 'updated_at' | 'area';
 type SortDir = 'asc' | 'desc';
 
-interface RecentUpdate {
+interface ActivityItem {
   id: string;
-  previous_qty: number;
-  new_qty: number;
-  updated_at: string;
-  notes: string | null;
-  updater: { full_name: string } | null;
-  inventory_item: {
-    product: { name: string } | null;
-    area: { name: string } | null;
-  } | null;
+  type: 'inventory_update' | 'order' | 'physical_count';
+  timestamp: string;
+  actor: string;
+  title: string;
+  detail: string;
+  area: string;
+  color: string;
 }
 
 function timeAgo(dateStr: string): string {
@@ -40,7 +39,7 @@ export default function DashboardPage() {
   const [profile, setProfile] = useState<Profile | null>(null);
   const [allItems, setAllItems] = useState<InventoryItem[]>([]);
   const [areas, setAreas] = useState<Area[]>([]);
-  const [recentUpdates, setRecentUpdates] = useState<RecentUpdate[]>([]);
+  const [activity, setActivity] = useState<ActivityItem[]>([]);
   const [filterArea, setFilterArea] = useState<string>('all');
   const [loading, setLoading] = useState(true);
 
@@ -49,6 +48,9 @@ export default function DashboardPage() {
   const [sortDir, setSortDir] = useState<SortDir>('asc');
   const [page, setPage] = useState(0);
 
+  // Stat counters
+  const [orderCount, setOrderCount] = useState(0);
+  const [pendingCounts, setPendingCounts] = useState(0);
 
   const loadData = useCallback(async () => {
     const { data: { user } } = await supabase.auth.getUser();
@@ -73,12 +75,15 @@ export default function DashboardPage() {
       .order('updated_at', { ascending: false });
     setAllItems((itemsData as InventoryItem[]) || []);
 
-    // Load recent activity — flat query, then enrich
+    // ── Load unified activity feed ──
+    const feedItems: ActivityItem[] = [];
+
+    // 1. Inventory updates (last 15)
     const { data: rawUpdates } = await supabase
       .from('inventory_updates')
       .select('id, previous_qty, new_qty, updated_at, notes, updated_by, inventory_item_id')
       .order('updated_at', { ascending: false })
-      .limit(10);
+      .limit(15);
 
     if (rawUpdates?.length) {
       const uIds = [...new Set(rawUpdates.map((r: any) => r.updated_by).filter(Boolean))];
@@ -98,28 +103,110 @@ export default function DashboardPage() {
       const prMap = new Map((prRes.data || []).map((p: any) => [p.id, p]));
       const aMap = new Map((aRes.data || []).map((a: any) => [a.id, a]));
 
-      setRecentUpdates(rawUpdates.map((r: any) => {
+      rawUpdates.forEach((r: any) => {
         const ii: any = iiMap.get(r.inventory_item_id);
         const updater: any = pMap.get(r.updated_by);
         const prod: any = ii ? prMap.get(ii.product_id) : null;
         const area: any = ii ? aMap.get(ii.area_id) : null;
-        return {
-          id: r.id, previous_qty: r.previous_qty, new_qty: r.new_qty, updated_at: r.updated_at, notes: r.notes,
-          updater: updater ? { full_name: updater.full_name } : null,
-          inventory_item: {
-            product: prod ? { name: prod.name } : null,
-            area: area ? { name: area.name } : null,
-          },
-        };
-      }));
-    } else {
-      setRecentUpdates([]);
+        const diff = r.new_qty - r.previous_qty;
+        feedItems.push({
+          id: `upd-${r.id}`,
+          type: 'inventory_update',
+          timestamp: r.updated_at,
+          actor: updater?.full_name || 'Alguien',
+          title: `${prod?.name || '?'}: ${r.previous_qty} → ${r.new_qty}`,
+          detail: r.notes || '',
+          area: area?.name || '',
+          color: diff >= 0 ? 'var(--success)' : 'var(--danger)',
+        });
+      });
     }
+
+    // 2. Orders (last 15)
+    const { data: rawOrders } = await supabase
+      .from('orders')
+      .select('id, category, status, created_at, created_by, area_id, items')
+      .order('created_at', { ascending: false })
+      .limit(15);
+
+    if (rawOrders?.length) {
+      const creatorIds = [...new Set(rawOrders.map((o: any) => o.created_by).filter(Boolean))];
+      const oAreaIds = [...new Set(rawOrders.map((o: any) => o.area_id).filter(Boolean))];
+      const [cRes, oaRes] = await Promise.all([
+        creatorIds.length ? supabase.from('profiles').select('id, full_name').in('id', creatorIds) : { data: [] },
+        oAreaIds.length ? supabase.from('areas').select('id, name').in('id', oAreaIds) : { data: [] },
+      ]);
+      const cMap = new Map((cRes.data || []).map((c: any) => [c.id, c]));
+      const oaMap = new Map((oaRes.data || []).map((a: any) => [a.id, a]));
+
+      rawOrders.forEach((o: any) => {
+        const creator: any = cMap.get(o.created_by);
+        const area: any = oaMap.get(o.area_id);
+        const itemCount = Array.isArray(o.items) ? o.items.length : 0;
+        const statusLabel = o.status === 'enviado' ? '✓ Enviado' : '⏳ Borrador';
+        feedItems.push({
+          id: `ord-${o.id}`,
+          type: 'order',
+          timestamp: o.created_at,
+          actor: creator?.full_name || 'Alguien',
+          title: `Pedido: ${o.category || 'General'} (${itemCount} productos)`,
+          detail: statusLabel,
+          area: area?.name || '',
+          color: o.status === 'enviado' ? '#22c55e' : '#eab308',
+        });
+      });
+      setOrderCount(rawOrders.length);
+    }
+
+    // 3. Physical counts (last 15)
+    try {
+      const { data: rawCounts } = await supabase
+        .from('physical_counts')
+        .select('id, status, created_at, submitted_by, area_id, items, notes')
+        .order('created_at', { ascending: false })
+        .limit(15);
+
+      if (rawCounts?.length) {
+        const subIds = [...new Set(rawCounts.map((c: any) => c.submitted_by).filter(Boolean))];
+        const cAreaIds = [...new Set(rawCounts.map((c: any) => c.area_id).filter(Boolean))];
+        const [sRes, caRes] = await Promise.all([
+          subIds.length ? supabase.from('profiles').select('id, full_name').in('id', subIds) : { data: [] },
+          cAreaIds.length ? supabase.from('areas').select('id, name').in('id', cAreaIds) : { data: [] },
+        ]);
+        const sMap = new Map((sRes.data || []).map((s: any) => [s.id, s]));
+        const caMap = new Map((caRes.data || []).map((a: any) => [a.id, a]));
+
+        rawCounts.forEach((c: any) => {
+          const submitter: any = sMap.get(c.submitted_by);
+          const area: any = caMap.get(c.area_id);
+          const itemCount = Array.isArray(c.items) ? c.items.length : 0;
+          const statusMap: Record<string, string> = { pendiente: '⏳ Pendiente', aprobado: '✓ Aprobado', rechazado: '✗ Rechazado' };
+          const colorMap: Record<string, string> = { pendiente: '#eab308', aprobado: '#22c55e', rechazado: '#ef4444' };
+          feedItems.push({
+            id: `cnt-${c.id}`,
+            type: 'physical_count',
+            timestamp: c.created_at,
+            actor: submitter?.full_name || 'Alguien',
+            title: `Conteo físico (${itemCount} productos)`,
+            detail: statusMap[c.status] || c.status,
+            area: area?.name || '',
+            color: colorMap[c.status] || '#eab308',
+          });
+        });
+        setPendingCounts(rawCounts.filter((c: any) => c.status === 'pendiente').length);
+      }
+    } catch {
+      // physical_counts table might not exist yet
+    }
+
+    // Sort all by timestamp desc, take top 20
+    feedItems.sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
+    setActivity(feedItems.slice(0, 20));
 
     setLoading(false);
   }, [supabase, router]);
 
-  useEffect(() => { loadData(); }, []);
+  useEffect(() => { loadData(); }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Realtime
   useEffect(() => {
@@ -128,6 +215,8 @@ export default function DashboardPage() {
       .channel('dashboard-realtime')
       .on('postgres_changes', { event: '*', schema: 'public', table: 'inventory_items' }, () => loadData())
       .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'inventory_updates' }, () => loadData())
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'orders' }, () => loadData())
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'physical_counts' }, () => loadData())
       .subscribe();
     return () => { supabase.removeChannel(channel); };
   }, [profile, supabase, loadData]);
@@ -197,6 +286,27 @@ export default function DashboardPage() {
     return sortDir === 'asc' ? '↑' : '↓';
   };
 
+  const typeIcon = (type: string) => {
+    switch (type) {
+      case 'inventory_update':
+        return <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><rect x="4" y="2" width="16" height="20" rx="2"/><line x1="8" y1="10" x2="16" y2="10"/><line x1="8" y1="14" x2="16" y2="14"/></svg>;
+      case 'order':
+        return <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>;
+      case 'physical_count':
+        return <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><path d="M9 11l3 3L22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/></svg>;
+      default: return null;
+    }
+  };
+
+  const typeLabel = (type: string) => {
+    switch (type) {
+      case 'inventory_update': return 'Ajuste';
+      case 'order': return 'Pedido';
+      case 'physical_count': return 'Conteo';
+      default: return '';
+    }
+  };
+
   if (loading) {
     return (<><Navbar /><div className="max-w-6xl mx-auto p-4"><p className="text-[var(--text-muted)]">Cargando...</p></div></>);
   }
@@ -217,25 +327,35 @@ export default function DashboardPage() {
         </div>
 
         {/* Stats Cards */}
-        <div className="grid grid-cols-1 sm:grid-cols-4 gap-4 mb-6">
-          <div className="card text-center">
-            <p className="text-3xl font-bold">{totalProducts}</p>
-            <p className="text-sm text-[var(--text-muted)]">Productos totales</p>
+        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3 mb-6">
+          <div className="card text-center py-4">
+            <p className="text-2xl font-bold">{totalProducts}</p>
+            <p className="text-xs text-[var(--text-muted)]">Productos</p>
           </div>
-          <div className="card text-center">
-            <p className="text-3xl font-bold text-[var(--danger)]">{lowStockCount}</p>
-            <p className="text-sm text-[var(--text-muted)]">Stock bajo (≤5)</p>
+          <div className="card text-center py-4">
+            <p className="text-2xl font-bold text-[var(--danger)]">{lowStockCount}</p>
+            <p className="text-xs text-[var(--text-muted)]">Stock bajo</p>
           </div>
-          <div className="card text-center">
-            <p className="text-3xl font-bold" style={{ color: lowStockPct > 30 ? 'var(--danger)' : 'var(--success)' }}>
+          <div className="card text-center py-4">
+            <p className="text-2xl font-bold" style={{ color: lowStockPct > 30 ? 'var(--danger)' : 'var(--success)' }}>
               {lowStockPct}%
             </p>
-            <p className="text-sm text-[var(--text-muted)]">% Stock bajo</p>
+            <p className="text-xs text-[var(--text-muted)]">% Bajo</p>
           </div>
-          <div className="card text-center">
-            <p className="text-3xl font-bold text-[var(--primary)]">{areas.length}</p>
-            <p className="text-sm text-[var(--text-muted)]">Áreas activas</p>
+          <div className="card text-center py-4">
+            <p className="text-2xl font-bold text-[var(--primary)]">{areas.length}</p>
+            <p className="text-xs text-[var(--text-muted)]">Áreas</p>
           </div>
+          <div className="card text-center py-4">
+            <p className="text-2xl font-bold" style={{ color: '#3b82f6' }}>{orderCount}</p>
+            <p className="text-xs text-[var(--text-muted)]">Pedidos</p>
+          </div>
+          <Link href="/inventory/count" className="card text-center py-4 hover:border-[var(--primary)] transition-colors">
+            <p className="text-2xl font-bold" style={{ color: pendingCounts > 0 ? '#eab308' : 'var(--success)' }}>
+              {pendingCounts}
+            </p>
+            <p className="text-xs text-[var(--text-muted)]">Conteos pend.</p>
+          </Link>
         </div>
 
         {/* Chart + Activity Feed side by side */}
@@ -267,37 +387,31 @@ export default function DashboardPage() {
             </div>
           </div>
 
-          {/* Activity Feed */}
+          {/* Unified Activity Feed */}
           <div className="card">
             <h2 className="text-lg font-semibold mb-4">Actividad Reciente</h2>
-            {recentUpdates.length === 0 ? (
+            {activity.length === 0 ? (
               <p className="text-[var(--text-muted)] text-sm">Sin actividad reciente.</p>
             ) : (
-              <div className="space-y-3">
-                {recentUpdates.map((u) => {
-                  const diff = u.new_qty - u.previous_qty;
-                  const isPositive = diff >= 0;
-                  return (
-                    <div key={u.id} className="flex items-start gap-3 text-sm">
-                      <div className={`mt-1 w-2 h-2 rounded-full flex-shrink-0 ${isPositive ? 'bg-[var(--success)]' : 'bg-[var(--danger)]'}`} />
-                      <div className="flex-1 min-w-0">
-                        <p>
-                          <span className="font-medium">{u.updater?.full_name || 'Alguien'}</span>
-                          {' '}cambió{' '}
-                          <span className="font-medium">{u.inventory_item?.product?.name || '?'}</span>
-                          {' '}
-                          <span className={isPositive ? 'text-[var(--success)]' : 'text-[var(--danger)]'}>
-                            {u.previous_qty} → {u.new_qty}
-                          </span>
-                        </p>
-                        <p className="text-[var(--text-muted)] text-xs">
-                          {u.inventory_item?.area?.name} · {timeAgo(u.updated_at)}
-                          {u.notes && ` · ${u.notes}`}
-                        </p>
-                      </div>
+              <div className="space-y-3 max-h-[400px] overflow-y-auto">
+                {activity.map((a) => (
+                  <div key={a.id} className="flex items-start gap-3 text-sm">
+                    <div className="mt-0.5 shrink-0" style={{ color: a.color }}>
+                      {typeIcon(a.type)}
                     </div>
-                  );
-                })}
+                    <div className="flex-1 min-w-0">
+                      <p>
+                        <span className="font-medium">{a.actor}</span>{' '}
+                        <span className="text-xs px-1.5 py-0.5 rounded bg-[var(--bg-input)] text-[var(--text-muted)]">{typeLabel(a.type)}</span>
+                      </p>
+                      <p className="text-sm">{a.title}</p>
+                      <p className="text-[var(--text-muted)] text-xs">
+                        {a.area && `${a.area} · `}{timeAgo(a.timestamp)}
+                        {a.detail && ` · ${a.detail}`}
+                      </p>
+                    </div>
+                  </div>
+                ))}
               </div>
             )}
           </div>
@@ -389,3 +503,4 @@ export default function DashboardPage() {
     </>
   );
 }
+

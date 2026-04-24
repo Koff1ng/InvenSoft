@@ -330,9 +330,9 @@ export default function InventoryPage() {
   return (
     <>
       <Navbar />
-      <div className="max-w-6xl mx-auto p-4">
+      <div className="max-w-6xl mx-auto p-4 animate-fade-in">
         {/* Header */}
-        <div className="flex items-center justify-between mb-6">
+        <div className="flex items-center justify-between mb-6 stagger-1">
           <div>
             <h1 className="text-xl font-semibold">Inventario</h1>
             <p className="text-[var(--text-muted)] text-xs mt-0.5">{areaName}</p>

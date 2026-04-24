@@ -1,6 +1,7 @@
 import type { Metadata, Viewport } from "next";
 import { Inter } from "next/font/google";
 import ClientProviders from "./ClientProviders";
+import Footer from "@/components/Footer";
 import "./globals.css";
 
 const inter = Inter({
@@ -34,9 +35,12 @@ export default function RootLayout({
 }>) {
   return (
     <html lang="es" className={inter.variable}>
-      <body className="min-h-screen font-[var(--font-inter)]">
+      <body className="min-h-screen font-[var(--font-inter)] flex flex-col bg-[var(--bg)] text-[var(--text)]">
         <ClientProviders>
-          {children}
+          <div className="flex-1 flex flex-col justify-start">
+            {children}
+          </div>
+          <Footer />
         </ClientProviders>
       </body>
     </html>

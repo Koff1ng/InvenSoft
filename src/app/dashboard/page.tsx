@@ -323,8 +323,8 @@ export default function DashboardPage() {
   return (
     <>
       <Navbar />
-      <div className="max-w-6xl mx-auto p-4">
-        <div className="flex items-center justify-between mb-6 flex-wrap gap-2">
+      <div className="max-w-6xl mx-auto p-4 animate-fade-in">
+        <div className="flex items-center justify-between mb-6 flex-wrap gap-2 stagger-1">
           <div>
             <h1 className="text-2xl font-bold">Dashboard Administrativo</h1>
             <p className="text-[var(--text-muted)] text-sm">Vista unificada del inventario</p>

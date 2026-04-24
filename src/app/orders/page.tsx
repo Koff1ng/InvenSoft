@@ -66,9 +66,37 @@ export default function OrdersPage() {
   const lastItemRef = useRef<HTMLInputElement>(null);
 
   const loadOrders = useCallback(async () => {
-    const { data } = await supabase.from('orders').select('*');
-    setOrders(data || []);
-  }, []);  // eslint-disable-line react-hooks/exhaustive-deps
+    const { data: rawOrders } = await supabase.from('orders').select('*').order('created_at', { ascending: false });
+    if (!rawOrders?.length) { setOrders([]); return; }
+
+    // Enrich with areas, sedes, profiles
+    const areaIds = [...new Set(rawOrders.map((o: any) => o.area_id).filter(Boolean))];
+    const sedeIds = [...new Set(rawOrders.map((o: any) => o.sede_id).filter(Boolean))];
+    const creatorIds = [...new Set(rawOrders.map((o: any) => o.created_by).filter(Boolean))];
+
+    const [areasRes, sedesRes, creatorsRes] = await Promise.all([
+      areaIds.length ? supabase.from('areas').select('id, name').in('id', areaIds) : { data: [] },
+      sedeIds.length ? supabase.from('sedes').select('id, name').in('id', sedeIds) : { data: [] },
+      creatorIds.length ? supabase.from('profiles').select('id, full_name').in('id', creatorIds) : { data: [] },
+    ]);
+
+    const areaMap = new Map((areasRes.data || []).map((a: any) => [a.id, a]));
+    const sedeMap = new Map((sedesRes.data || []).map((s: any) => [s.id, s]));
+    const creatorMap = new Map((creatorsRes.data || []).map((p: any) => [p.id, p]));
+
+    setOrders(rawOrders.map((o: any) => {
+      const area: any = areaMap.get(o.area_id);
+      const sede: any = sedeMap.get(o.sede_id);
+      const creator: any = creatorMap.get(o.created_by);
+      return {
+        ...o,
+        area: area ? { name: area.name } : null,
+        sede: sede ? { name: sede.name } : null,
+        creator: creator ? { full_name: creator.full_name } : null,
+        item_count: Array.isArray(o.items) ? o.items.length : 0,
+      };
+    }));
+  }, [supabase]);
 
   useEffect(() => {
     const init = async () => {

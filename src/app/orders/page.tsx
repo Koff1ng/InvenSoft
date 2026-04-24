@@ -162,7 +162,7 @@ export default function OrdersPage() {
     const areaId = orderArea || profile.area_id;
     if (!areaId) { setFormError('Selecciona un área'); setFormLoading(false); return; }
 
-    if (!resolvedCategory) { setFormError('Selecciona o escribe una categoría'); setFormLoading(false); return; }
+    // Category is optional — don't require it
 
     const validItems = orderItems.filter(i => i.product_name.trim());
     if (validItems.length === 0) { setFormError('Agrega al menos un producto'); setFormLoading(false); return; }
@@ -171,7 +171,7 @@ export default function OrdersPage() {
       area_id: areaId,
       sede_id: orderSede || null,
       created_by: user.id,
-      category: resolvedCategory,
+      category: resolvedCategory || null,
       notes: orderNotes || null,
       items: validItems.map(i => ({
         product_name: i.product_name.trim(),
@@ -365,7 +365,7 @@ export default function OrdersPage() {
                 {/* ── Category ── */}
                 <div>
                   <label className="block text-xs font-medium text-[var(--text-muted)] uppercase tracking-wider mb-2">
-                    Categoría
+                    Categoría <span className="normal-case font-normal">(opcional — para organizar el pedido)</span>
                   </label>
                   <div className="flex flex-wrap gap-2">
                     {savedCategories.map(cat => (

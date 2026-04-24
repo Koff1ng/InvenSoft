@@ -73,13 +73,48 @@ export default function DashboardPage() {
       .order('updated_at', { ascending: false });
     setAllItems((itemsData as InventoryItem[]) || []);
 
-    // Load recent activity
-    const { data: updates } = await supabase
+    // Load recent activity — flat query, then enrich
+    const { data: rawUpdates } = await supabase
       .from('inventory_updates')
-      .select('*, updater:profiles!inventory_updates_updated_by_fkey(full_name), inventory_item:inventory_items!inventory_updates_inventory_item_id_fkey(product:products(name), area:areas(name))')
+      .select('id, previous_qty, new_qty, updated_at, notes, updated_by, inventory_item_id')
       .order('updated_at', { ascending: false })
       .limit(10);
-    setRecentUpdates((updates as unknown as RecentUpdate[]) || []);
+
+    if (rawUpdates?.length) {
+      const uIds = [...new Set(rawUpdates.map((r: any) => r.updated_by).filter(Boolean))];
+      const iIds = [...new Set(rawUpdates.map((r: any) => r.inventory_item_id).filter(Boolean))];
+      const [pRes, iiRes] = await Promise.all([
+        uIds.length ? supabase.from('profiles').select('id, full_name').in('id', uIds) : { data: [] },
+        iIds.length ? supabase.from('inventory_items').select('id, product_id, area_id').in('id', iIds) : { data: [] },
+      ]);
+      const pMap = new Map((pRes.data || []).map((p: any) => [p.id, p]));
+      const iiMap = new Map((iiRes.data || []).map((i: any) => [i.id, i]));
+      const prIds = [...new Set((iiRes.data || []).map((i: any) => i.product_id).filter(Boolean))];
+      const aIds = [...new Set((iiRes.data || []).map((i: any) => i.area_id).filter(Boolean))];
+      const [prRes, aRes] = await Promise.all([
+        prIds.length ? supabase.from('products').select('id, name').in('id', prIds) : { data: [] },
+        aIds.length ? supabase.from('areas').select('id, name').in('id', aIds) : { data: [] },
+      ]);
+      const prMap = new Map((prRes.data || []).map((p: any) => [p.id, p]));
+      const aMap = new Map((aRes.data || []).map((a: any) => [a.id, a]));
+
+      setRecentUpdates(rawUpdates.map((r: any) => {
+        const ii: any = iiMap.get(r.inventory_item_id);
+        const updater: any = pMap.get(r.updated_by);
+        const prod: any = ii ? prMap.get(ii.product_id) : null;
+        const area: any = ii ? aMap.get(ii.area_id) : null;
+        return {
+          id: r.id, previous_qty: r.previous_qty, new_qty: r.new_qty, updated_at: r.updated_at, notes: r.notes,
+          updater: updater ? { full_name: updater.full_name } : null,
+          inventory_item: {
+            product: prod ? { name: prod.name } : null,
+            area: area ? { name: area.name } : null,
+          },
+        };
+      }));
+    } else {
+      setRecentUpdates([]);
+    }
 
     setLoading(false);
   }, [supabase, router]);

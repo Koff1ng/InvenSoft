@@ -50,7 +50,7 @@ export default function HistoryPage() {
     let query = supabase
       .from('inventory_updates')
       .select(
-        '*, updater:profiles!inventory_updates_updated_by_fkey(full_name), inventory_item:inventory_items!inventory_updates_inventory_item_id_fkey(product:products(name, unit), area:areas(name))',
+        'id, previous_qty, new_qty, updated_at, notes, updated_by, inventory_item_id',
         { count: 'exact' }
       )
       .order('updated_at', { ascending: false });
@@ -64,8 +64,60 @@ export default function HistoryPage() {
 
     query = query.range(page * PAGE_SIZE, (page + 1) * PAGE_SIZE - 1);
 
-    const { data, count } = await query;
-    setEntries((data as unknown as HistoryEntry[]) || []);
+    const { data: rawData, count } = await query;
+    if (!rawData?.length) {
+      setEntries([]);
+      setTotalCount(count || 0);
+      setLoading(false);
+      return;
+    }
+
+    // Enrich with profiles, inventory_items, products, areas
+    const updaterIds = [...new Set(rawData.map((r: any) => r.updated_by).filter(Boolean))];
+    const itemIds = [...new Set(rawData.map((r: any) => r.inventory_item_id).filter(Boolean))];
+
+    const [profilesRes, itemsRes] = await Promise.all([
+      updaterIds.length ? supabase.from('profiles').select('id, full_name').in('id', updaterIds) : { data: [] },
+      itemIds.length ? supabase.from('inventory_items').select('id, product_id, area_id').in('id', itemIds) : { data: [] },
+    ]);
+
+    const profileMap = new Map((profilesRes.data || []).map((p: any) => [p.id, p]));
+    const itemMap = new Map((itemsRes.data || []).map((i: any) => [i.id, i]));
+
+    // Get product and area details
+    const productIds = [...new Set((itemsRes.data || []).map((i: any) => i.product_id).filter(Boolean))];
+    const areaIds = [...new Set((itemsRes.data || []).map((i: any) => i.area_id).filter(Boolean))];
+
+    const [productsRes, areasRes] = await Promise.all([
+      productIds.length ? supabase.from('products').select('id, name, unit').in('id', productIds) : { data: [] },
+      areaIds.length ? supabase.from('areas').select('id, name').in('id', areaIds) : { data: [] },
+    ]);
+
+    const productMap = new Map((productsRes.data || []).map((p: any) => [p.id, p]));
+    const areaMap = new Map((areasRes.data || []).map((a: any) => [a.id, a]));
+
+    // Build enriched entries
+    const enriched: HistoryEntry[] = rawData.map((r: any) => {
+      const invItem: any = itemMap.get(r.inventory_item_id);
+      const product: any = invItem ? productMap.get(invItem.product_id) : null;
+      const area: any = invItem ? areaMap.get(invItem.area_id) : null;
+      const updater: any = profileMap.get(r.updated_by);
+
+      return {
+        id: r.id,
+        previous_qty: r.previous_qty,
+        new_qty: r.new_qty,
+        updated_at: r.updated_at,
+        notes: r.notes,
+        updater: updater ? { full_name: updater.full_name } : null,
+        inventory_item: {
+          product: product ? { name: product.name, unit: product.unit } : null,
+          area: area ? { name: area.name } : null,
+        },
+      };
+    });
+
+    setEntries(enriched);
     setTotalCount(count || 0);
     setLoading(false);
   };

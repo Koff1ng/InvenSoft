@@ -35,9 +35,9 @@
   animation: fadeIn 0.4s ease-out forwards;
 }
 
-.stagger-1 { animation-delay: 50ms; opacity: 0; }
-.stagger-2 { animation-delay: 100ms; opacity: 0; }
-.stagger-3 { animation-delay: 150ms; opacity: 0; }
+.stagger-1 { animation-delay: 50ms; }
+.stagger-2 { animation-delay: 100ms; }
+.stagger-3 { animation-delay: 150ms; }
 
 body {
   background-color: var(--bg);

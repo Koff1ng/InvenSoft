@@ -3,10 +3,28 @@ import { createServerClient } from '@supabase/ssr';
 import { cookies } from 'next/headers';
 import ExcelJS from 'exceljs';
 
-const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL!;
-const SUPABASE_ANON_KEY = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!;
+export const dynamic = 'force-dynamic';
+export const revalidate = 0;
+
+const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL;
+const SUPABASE_ANON_KEY = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+
+interface OrderItem {
+  product_name?: string;
+  quantity?: number | string;
+  unit?: string;
+  notes?: string | null;
+  category?: string;
+}
 
 export async function GET(request: Request) {
+  if (!SUPABASE_URL || !SUPABASE_ANON_KEY) {
+    return NextResponse.json(
+      { error: 'Exportación no disponible: faltan credenciales de Supabase en el servidor.' },
+      { status: 503 }
+    );
+  }
+
   const cookieStore = await cookies();
   const supabase = createServerClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
     cookies: {
@@ -22,18 +40,49 @@ export async function GET(request: Request) {
   const orderId = url.searchParams.get('id');
   if (!orderId) return NextResponse.json({ error: 'id requerido' }, { status: 400 });
 
-  const { data: order } = await supabase
+  // UUID v4 sanity check (avoid arbitrary string injection that could throw a 500)
+  const uuidRe = /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/;
+  if (!uuidRe.test(orderId)) {
+    return NextResponse.json({ error: 'id inválido' }, { status: 400 });
+  }
+
+  // Caller role + area for authorization
+  const { data: profile } = await supabase
+    .from('profiles')
+    .select('role, area_id')
+    .eq('id', user.id)
+    .single();
+  if (!profile) return NextResponse.json({ error: 'Perfil no encontrado' }, { status: 403 });
+
+  const { data: order, error: orderErr } = await supabase
     .from('orders')
     .select('*, area:areas(name), sede:sedes(name), creator:profiles!orders_created_by_fkey(full_name)')
     .eq('id', orderId)
     .single();
 
-  if (!order) return NextResponse.json({ error: 'Pedido no encontrado' }, { status: 404 });
+  if (orderErr || !order) {
+    return NextResponse.json({ error: 'Pedido no encontrado' }, { status: 404 });
+  }
 
-  const items: any[] = Array.isArray(order.items) ? order.items : [];
+  // Authorization: admin can export anything (except others' borradores).
+  // Non-admin can export only orders from their own area, OR orders they created.
+  const isAdmin = profile.role === 'admin';
+  const isCreator = order.created_by === user.id;
+  const sameArea = profile.area_id && order.area_id === profile.area_id;
 
-  // Group items by category
-  const byCategory: Record<string, any[]> = {};
+  if (isAdmin) {
+    if (order.status === 'borrador' && !isCreator) {
+      return NextResponse.json({ error: 'No autorizado: borrador ajeno' }, { status: 403 });
+    }
+  } else {
+    if (!isCreator && !sameArea) {
+      return NextResponse.json({ error: 'No autorizado' }, { status: 403 });
+    }
+  }
+
+  const items: OrderItem[] = Array.isArray(order.items) ? order.items : [];
+
+  const byCategory: Record<string, OrderItem[]> = {};
   for (const item of items) {
     const cat = item.category || 'General';
     if (!byCategory[cat]) byCategory[cat] = [];
@@ -74,9 +123,12 @@ export async function GET(request: Request) {
 
   ws.mergeCells('A3:E3');
   const dateSub = ws.getCell('A3');
-  const now = new Date(order.created_at);
-  const statusLabel = order.status === 'enviado' ? 'Enviado' : 'Borrador';
-  dateSub.value = `Fecha: ${now.toLocaleDateString('es-CO', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' })}  |  Estado: ${statusLabel}`;
+  const orderDate = new Date(order.created_at);
+  const statusLabel =
+    order.status === 'aprobado' ? 'Aprobado'
+    : order.status === 'enviado' ? 'Enviado'
+    : 'Borrador';
+  dateSub.value = `Fecha: ${orderDate.toLocaleDateString('es-CO', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' })}  |  Estado: ${statusLabel}`;
   dateSub.font = { name: 'Calibri', size: 10, italic: true, color: { argb: COLORS.headerFont } };
   dateSub.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: COLORS.accent } };
   dateSub.alignment = { horizontal: 'center', vertical: 'middle' };
@@ -100,48 +152,62 @@ export async function GET(request: Request) {
   let rowIdx = 6;
   let itemNum = 1;
 
-  for (const catName of catNames) {
-    const catItems = byCategory[catName];
-
-    // Category header row
+  if (items.length === 0) {
     ws.mergeCells(`A${rowIdx}:E${rowIdx}`);
-    const catCell = ws.getRow(rowIdx).getCell(1);
-    catCell.value = `${catName}  (${catItems.length} productos)`;
-    catCell.font = { name: 'Calibri', size: 11, bold: true, color: { argb: COLORS.catFont } };
-    catCell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: COLORS.catBg } };
-    catCell.alignment = { vertical: 'middle' };
+    const empty = ws.getRow(rowIdx).getCell(1);
+    empty.value = 'Este pedido no tiene productos';
+    empty.font = { name: 'Calibri', size: 10, italic: true, color: { argb: COLORS.catFont } };
+    empty.alignment = { horizontal: 'center', vertical: 'middle' };
     ws.getRow(rowIdx).height = 26;
     rowIdx++;
+  } else {
+    for (const catName of catNames) {
+      const catItems = byCategory[catName];
 
-    catItems.forEach((item: any, j: number) => {
-      const row = ws.getRow(rowIdx);
-      const isOdd = j % 2 === 0;
-      const vals = [itemNum, item.product_name || '', Number(item.quantity) || 0, item.unit || '', item.notes || ''];
-      vals.forEach((val, i) => {
-        const cell = row.getCell(i + 1);
-        cell.value = val;
-        cell.font = { name: 'Calibri', size: 10 };
-        cell.alignment = { vertical: 'middle', wrapText: i === 4 };
-        cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: isOdd ? COLORS.oddRow : COLORS.evenRow } };
-        cell.border = { bottom: { style: 'thin', color: { argb: COLORS.border } } };
-        if (i === 0 || i === 2 || i === 3) cell.alignment = { horizontal: 'center', vertical: 'middle' };
-        if (i === 2) cell.numFmt = '#,##0.##';
-      });
-      row.height = 22;
+      ws.mergeCells(`A${rowIdx}:E${rowIdx}`);
+      const catCell = ws.getRow(rowIdx).getCell(1);
+      catCell.value = `${catName}  (${catItems.length} ${catItems.length === 1 ? 'producto' : 'productos'})`;
+      catCell.font = { name: 'Calibri', size: 11, bold: true, color: { argb: COLORS.catFont } };
+      catCell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: COLORS.catBg } };
+      catCell.alignment = { vertical: 'middle' };
+      ws.getRow(rowIdx).height = 26;
       rowIdx++;
-      itemNum++;
-    });
 
-    // Small spacer between categories
-    ws.getRow(rowIdx).height = 6;
-    rowIdx++;
+      catItems.forEach((item, j) => {
+        const row = ws.getRow(rowIdx);
+        const isOdd = j % 2 === 0;
+        const vals: (string | number)[] = [
+          itemNum,
+          item.product_name || '',
+          Number(item.quantity) || 0,
+          item.unit || '',
+          item.notes || '',
+        ];
+        vals.forEach((val, i) => {
+          const cell = row.getCell(i + 1);
+          cell.value = val;
+          cell.font = { name: 'Calibri', size: 10 };
+          cell.alignment = { vertical: 'middle', wrapText: i === 4 };
+          cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: isOdd ? COLORS.oddRow : COLORS.evenRow } };
+          cell.border = { bottom: { style: 'thin', color: { argb: COLORS.border } } };
+          if (i === 0 || i === 2 || i === 3) cell.alignment = { horizontal: 'center', vertical: 'middle' };
+          if (i === 2) cell.numFmt = '#,##0.##';
+        });
+        row.height = 22;
+        rowIdx++;
+        itemNum++;
+      });
+
+      ws.getRow(rowIdx).height = 6;
+      rowIdx++;
+    }
   }
 
   // Footer
   rowIdx++;
   ws.mergeCells(`A${rowIdx}:E${rowIdx}`);
   const footer = ws.getCell(`A${rowIdx}`);
-  footer.value = `Total: ${items.length} productos en ${catNames.length} ${catNames.length === 1 ? 'categoría' : 'categorías'}`;
+  footer.value = `Total: ${items.length} ${items.length === 1 ? 'producto' : 'productos'} en ${catNames.length} ${catNames.length === 1 ? 'categoría' : 'categorías'}`;
   footer.font = { name: 'Calibri', size: 10, italic: true, color: { argb: COLORS.primaryLight } };
   footer.alignment = { horizontal: 'center', vertical: 'middle' };
   ws.getRow(rowIdx).height = 28;
@@ -150,13 +216,14 @@ export async function GET(request: Request) {
   ws.getColumn(4).width = 14; ws.getColumn(5).width = 28;
 
   const buffer = await wb.xlsx.writeBuffer();
-  const areaSlug = String(order.area?.name || 'pedido').replace(/\s+/g, '_');
-  const dateStr = now.toISOString().split('T')[0];
+  const areaSlug = String(order.area?.name || 'pedido').replace(/[^\w\-]+/g, '_').slice(0, 40);
+  const dateStr = orderDate.toISOString().split('T')[0];
 
   return new NextResponse(buffer, {
     headers: {
       'Content-Type': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
       'Content-Disposition': `attachment; filename="Pedido_${areaSlug}_${dateStr}.xlsx"`,
+      'Cache-Control': 'no-store, max-age=0',
     },
   });
 }

@@ -12,8 +12,11 @@ function getUser(request: NextRequest) {
 
 export async function POST(request: NextRequest) {
   const session = getUser(request);
+  if (!session) {
+    return NextResponse.json({ error: 'No autorizado' }, { status: 401 });
+  }
   const body = await request.json();
-  const { table, operation, data, filters, id } = body;
+  const { table, operation, data, filters } = body;
 
   // ---- AREAS ----
   if (table === 'areas' && operation === 'select') {
@@ -139,8 +142,9 @@ export async function POST(request: NextRequest) {
         notes: data.notes,
       });
       return NextResponse.json({ data: result, error: null });
-    } catch (err: any) {
-      return NextResponse.json({ error: err.message }, { status: 400 });
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : 'Error en la transferencia';
+      return NextResponse.json({ error: message }, { status: 400 });
     }
   }
 
@@ -213,8 +217,8 @@ export async function POST(request: NextRequest) {
         ORDER BY pc.created_at DESC
       `).all(...params) as Record<string, unknown>[];
 
-      const enriched = rows.map((r: any) => {
-        let items: any[] = [];
+      const enriched = rows.map((r) => {
+        let items: unknown[] = [];
         try { items = JSON.parse(String(r.items || '[]')); } catch { /* empty */ }
         return {
           ...r,

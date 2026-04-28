@@ -113,18 +113,41 @@ export default function UsersPage() {
     setFormError('');
 
     if (editingUser) {
-      // Update profile
+      // 1) Update profile fields (full_name / role / area_id) directly
       const updates: Record<string, unknown> = {
         full_name: fullName,
         role,
         area_id: role === 'admin' ? null : areaId || null,
       };
-      if (username.trim()) updates.username = username.trim();
       const { error } = await supabase
         .from('profiles')
         .update(updates)
         .eq('id', editingUser.id);
       if (error) { setFormError(error.message); setFormLoading(false); return; }
+
+      // 2) If username or password changed, route through the privileged API
+      const newUsername = username.trim();
+      const usernameChanged = newUsername && newUsername !== (editingUser.username || '');
+      const passwordChanged = password.length > 0;
+
+      if (usernameChanged || passwordChanged) {
+        if (passwordChanged && password.length < 6) {
+          setFormError('La nueva contraseña debe tener al menos 6 caracteres');
+          setFormLoading(false);
+          return;
+        }
+        const res = await fetch('/api/users', {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            id: editingUser.id,
+            ...(usernameChanged ? { username: newUsername } : {}),
+            ...(passwordChanged ? { password } : {}),
+          }),
+        });
+        const data = await res.json();
+        if (!res.ok) { setFormError(data.error || 'Error al actualizar credenciales'); setFormLoading(false); return; }
+      }
     } else {
       // Create via server API (no session hijack)
       if (!username.trim()) { setFormError('Ingresa un usuario o correo'); setFormLoading(false); return; }

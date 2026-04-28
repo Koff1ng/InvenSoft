@@ -12,7 +12,7 @@ export default function ImportPage() {
   const [profile, setProfile] = useState<Profile | null>(null);
   const [areas, setAreas] = useState<Area[]>([]);
   const [selectedAreaId, setSelectedAreaId] = useState('');
-  const [csvText, setCsvText] = useState('');
+  const [, setCsvText] = useState('');
   const [preview, setPreview] = useState<string[][]>([]);
   const [loading, setLoading] = useState(false);
   const [result, setResult] = useState<{ ok: number; err: number } | null>(null);

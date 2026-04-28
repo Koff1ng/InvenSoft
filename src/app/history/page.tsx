@@ -1,8 +1,7 @@
 'use client';
 
-import { useEffect, useState, useMemo } from 'react';
+import { useEffect, useState, useMemo, useCallback } from 'react';
 import { createClient } from '@/lib/supabase-client';
-import type { Profile } from '@/lib/types';
 import Navbar from '@/components/Navbar';
 
 interface HistoryEntry {
@@ -18,11 +17,25 @@ interface HistoryEntry {
   } | null;
 }
 
+interface RawUpdate {
+  id: string;
+  previous_qty: number;
+  new_qty: number;
+  updated_at: string;
+  notes: string | null;
+  updated_by: string | null;
+  inventory_item_id: string | null;
+}
+
+interface RawProfile { id: string; full_name: string }
+interface RawItem { id: string; product_id: string | null; area_id: string | null }
+interface RawProduct { id: string; name: string; unit: string }
+interface RawArea { id: string; name: string }
+
 const PAGE_SIZE = 25;
 
 export default function HistoryPage() {
   const supabase = useMemo(() => createClient(), []);
-  const [profile, setProfile] = useState<Profile | null>(null);
   const [entries, setEntries] = useState<HistoryEntry[]>([]);
   const [loading, setLoading] = useState(true);
   const [page, setPage] = useState(0);
@@ -30,20 +43,15 @@ export default function HistoryPage() {
   const [dateFrom, setDateFrom] = useState('');
   const [dateTo, setDateTo] = useState('');
 
-  useEffect(() => {
-    loadData();
-  }, [page, dateFrom, dateTo]);
-
-  const loadData = async () => {
+  const loadData = useCallback(async () => {
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) return;
 
     const { data: prof } = await supabase
       .from('profiles')
-      .select('*')
+      .select('role, area_id')
       .eq('id', user.id)
       .single();
-    setProfile(prof);
 
     if (!prof) return;
 
@@ -55,7 +63,6 @@ export default function HistoryPage() {
       )
       .order('updated_at', { ascending: false });
 
-    // Restrict by area if not admin
     if (prof.role !== 'admin' && prof.area_id) {
       query = query.eq('inventory_items.area_id', prof.area_id);
     }
@@ -70,43 +77,44 @@ export default function HistoryPage() {
     query = query.range(page * PAGE_SIZE, (page + 1) * PAGE_SIZE - 1);
 
     const { data: rawData, count } = await query;
-    if (!rawData?.length) {
+    const updates = (rawData as RawUpdate[] | null) || [];
+    if (!updates.length) {
       setEntries([]);
       setTotalCount(count || 0);
       setLoading(false);
       return;
     }
 
-    // Enrich with profiles, inventory_items, products, areas
-    const updaterIds = [...new Set(rawData.map((r: any) => r.updated_by).filter(Boolean))];
-    const itemIds = [...new Set(rawData.map((r: any) => r.inventory_item_id).filter(Boolean))];
+    const updaterIds = [...new Set(updates.map(r => r.updated_by).filter((v): v is string => !!v))];
+    const itemIds = [...new Set(updates.map(r => r.inventory_item_id).filter((v): v is string => !!v))];
 
     const [profilesRes, itemsRes] = await Promise.all([
       updaterIds.length ? supabase.from('profiles').select('id, full_name').in('id', updaterIds) : { data: [] },
       itemIds.length ? supabase.from('inventory_items').select('id, product_id, area_id').in('id', itemIds) : { data: [] },
     ]);
 
-    const profileMap = new Map((profilesRes.data || []).map((p: any) => [p.id, p]));
-    const itemMap = new Map((itemsRes.data || []).map((i: any) => [i.id, i]));
+    const profiles = (profilesRes.data as RawProfile[] | null) || [];
+    const items = (itemsRes.data as RawItem[] | null) || [];
 
-    // Get product and area details
-    const productIds = [...new Set((itemsRes.data || []).map((i: any) => i.product_id).filter(Boolean))];
-    const areaIds = [...new Set((itemsRes.data || []).map((i: any) => i.area_id).filter(Boolean))];
+    const profileMap = new Map(profiles.map(p => [p.id, p]));
+    const itemMap = new Map(items.map(i => [i.id, i]));
+
+    const productIds = [...new Set(items.map(i => i.product_id).filter((v): v is string => !!v))];
+    const areaIds = [...new Set(items.map(i => i.area_id).filter((v): v is string => !!v))];
 
     const [productsRes, areasRes] = await Promise.all([
       productIds.length ? supabase.from('products').select('id, name, unit').in('id', productIds) : { data: [] },
       areaIds.length ? supabase.from('areas').select('id, name').in('id', areaIds) : { data: [] },
     ]);
 
-    const productMap = new Map((productsRes.data || []).map((p: any) => [p.id, p]));
-    const areaMap = new Map((areasRes.data || []).map((a: any) => [a.id, a]));
+    const productMap = new Map(((productsRes.data as RawProduct[] | null) || []).map(p => [p.id, p]));
+    const areaMap = new Map(((areasRes.data as RawArea[] | null) || []).map(a => [a.id, a]));
 
-    // Build enriched entries
-    const enriched: HistoryEntry[] = rawData.map((r: any) => {
-      const invItem: any = itemMap.get(r.inventory_item_id);
-      const product: any = invItem ? productMap.get(invItem.product_id) : null;
-      const area: any = invItem ? areaMap.get(invItem.area_id) : null;
-      const updater: any = profileMap.get(r.updated_by);
+    const enriched: HistoryEntry[] = updates.map(r => {
+      const invItem = r.inventory_item_id ? itemMap.get(r.inventory_item_id) : undefined;
+      const product = invItem?.product_id ? productMap.get(invItem.product_id) : undefined;
+      const area = invItem?.area_id ? areaMap.get(invItem.area_id) : undefined;
+      const updater = r.updated_by ? profileMap.get(r.updated_by) : undefined;
 
       return {
         id: r.id,
@@ -125,7 +133,11 @@ export default function HistoryPage() {
     setEntries(enriched);
     setTotalCount(count || 0);
     setLoading(false);
-  };
+  }, [supabase, page, dateFrom, dateTo]);
+
+  useEffect(() => {
+    loadData();
+  }, [loadData]);
 
   const totalPages = Math.ceil(totalCount / PAGE_SIZE);
 

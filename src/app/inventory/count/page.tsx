@@ -2,12 +2,12 @@
 
 import { useEffect, useState, useCallback, useMemo } from 'react';
 import { createClient } from '@/lib/supabase-client';
-import type { Profile, InventoryItem, Area } from '@/lib/types';
+import type { Profile } from '@/lib/types';
 import Navbar from '@/components/Navbar';
-import { useRouter } from 'next/navigation';
 
 interface CountItem {
   inventory_item_id: string;
+  area_id: string;
   product_name: string;
   product_unit: string;
   system_qty: number;
@@ -33,7 +33,6 @@ interface PhysicalCount {
 
 export default function PhysicalCountPage() {
   const supabase = useMemo(() => createClient(), []);
-  const router = useRouter();
   const [profile, setProfile] = useState<Profile | null>(null);
   const [loading, setLoading] = useState(true);
 
@@ -108,14 +107,15 @@ export default function PhysicalCountPage() {
     const areaId = profile.area_id;
     if (!areaId && profile.role !== 'admin') return;
 
-    let query = supabase.from('inventory_items').select('id, quantity, product:products(name, unit), area:areas(name)');
+    let query = supabase.from('inventory_items').select('id, area_id, quantity, product:products(name, unit), area:areas(name)');
     if (profile.role !== 'admin') query = query.eq('area_id', areaId!);
 
     const { data } = await query;
     if (!data?.length) { setFormError('No hay productos en tu área'); return; }
 
-    setCountItems(data.map((item: any) => ({
+    setCountItems(data.map((item: { id: string; area_id: string; quantity: number; product?: { name?: string; unit?: string } | null }) => ({
       inventory_item_id: item.id,
+      area_id: item.area_id,
       product_name: item.product?.name || '—',
       product_unit: item.product?.unit || '',
       system_qty: item.quantity,
@@ -138,10 +138,17 @@ export default function PhysicalCountPage() {
     }
 
     const { data: { user } } = await supabase.auth.getUser();
-    if (!user) return;
+    if (!user) { setFormLoading(false); return; }
+
+    const targetAreaId = profile?.area_id || filledItems[0]?.area_id;
+    if (!targetAreaId) {
+      setFormError('No hay área asignada para este conteo');
+      setFormLoading(false);
+      return;
+    }
 
     const { error } = await supabase.from('physical_counts').insert({
-      area_id: profile?.area_id || countItems[0]?.inventory_item_id,
+      area_id: targetAreaId,
       submitted_by: user.id,
       notes: countNotes || null,
       items: filledItems.map(i => ({

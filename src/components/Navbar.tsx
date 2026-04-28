@@ -13,6 +13,14 @@ export default function Navbar() {
   const pathname = usePathname();
   const [profile, setProfile] = useState<Profile | null>(null);
   const [menuOpen, setMenuOpen] = useState(false);
+  // Derived-state pattern: close the mobile menu whenever the URL changes,
+  // without firing a side-effect inside useEffect (which Next 16 marks as
+  // an error: react-hooks/set-state-in-effect).
+  const [lastPathname, setLastPathname] = useState(pathname);
+  if (lastPathname !== pathname) {
+    setLastPathname(pathname);
+    if (menuOpen) setMenuOpen(false);
+  }
 
   useEffect(() => {
     let cancelled = false;
@@ -25,9 +33,6 @@ export default function Navbar() {
     loadProfile();
     return () => { cancelled = true; };
   }, [supabase]);
-
-  // Close menu on route change
-  useEffect(() => { setMenuOpen(false); }, [pathname]);
 
   const handleLogout = async () => {
     await supabase.auth.signOut();

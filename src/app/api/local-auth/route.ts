@@ -33,8 +33,15 @@ export async function POST(request: NextRequest) {
 
   if (action === 'login') {
     const { email, password } = body;
-    const username = email; // accept 'email' field from frontend as username
-    const user = getUserByUsername(username);
+    // The frontend converts plain usernames to "<user>@lacomitiva.local" so the
+    // same form can talk to Supabase Auth. In local SQLite mode we store the
+    // plain username, so strip the suffix here before the lookup.
+    const raw = String(email || '').trim();
+    const stripped = raw.toLowerCase().endsWith('@lacomitiva.local')
+      ? raw.slice(0, -'@lacomitiva.local'.length)
+      : raw;
+    // Try the stripped form first, then fall back to the raw value (real emails).
+    const user = getUserByUsername(stripped) || getUserByUsername(raw);
     if (!user || !bcrypt.compareSync(password, user.password_hash)) {
       return NextResponse.json({ error: 'Credenciales inválidas' }, { status: 400 });
     }

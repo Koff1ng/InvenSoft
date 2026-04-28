@@ -395,7 +395,7 @@ export default function InventoryPage() {
           {categories.length > 0 && (
             <select
               value={filterCategory}
-              onChange={(e) => setFilterCategory(e.target.value)}
+              onChange={(e) => { setFilterCategory(e.target.value); setPage(0); }}
               className="input-field w-auto text-xs"
             >
               <option value="all">Categoría</option>
@@ -521,6 +521,7 @@ export default function InventoryPage() {
                         Cantidad {sortIcon('quantity')}
                       </th>
                     )}
+                    <th className="py-3 px-4">Unidad</th>
                     <th className="py-3 px-4 cursor-pointer select-none" onClick={() => toggleSort('updated_at')}>
                       Actualización {sortIcon('updated_at')}
                     </th>

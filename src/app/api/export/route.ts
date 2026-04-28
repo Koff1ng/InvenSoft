@@ -3,11 +3,28 @@ import { createServerClient } from '@supabase/ssr';
 import { cookies } from 'next/headers';
 import ExcelJS from 'exceljs';
 
-const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL!;
-const SUPABASE_ANON_KEY = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!;
+export const dynamic = 'force-dynamic';
+export const revalidate = 0;
+
+const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL;
+const SUPABASE_ANON_KEY = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+
+interface InventoryItemRow {
+  quantity: number;
+  updated_at: string | null;
+  product: { name?: string; unit?: string; category?: string; notes?: string } | null;
+  area: { name?: string } | null;
+  sede: { name?: string } | null;
+}
 
 export async function GET(request: Request) {
-  // Auth via Supabase
+  if (!SUPABASE_URL || !SUPABASE_ANON_KEY) {
+    return NextResponse.json(
+      { error: 'Exportación no disponible: faltan credenciales de Supabase en el servidor.' },
+      { status: 503 }
+    );
+  }
+
   const cookieStore = await cookies();
   const supabase = createServerClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
     cookies: {
@@ -24,7 +41,6 @@ export async function GET(request: Request) {
     return NextResponse.json({ error: 'No autorizado' }, { status: 403 });
   }
 
-  // Fetch inventory data from Supabase
   const url = new URL(request.url);
   const sedeId = url.searchParams.get('sede') || undefined;
 
@@ -34,11 +50,17 @@ export async function GET(request: Request) {
 
   if (sedeId) query = query.eq('sede_id', sedeId);
 
-  const { data: items } = await query;
-  if (!items?.length) return new NextResponse('No hay datos para exportar', { status: 200 });
+  const { data: itemsRaw, error: queryErr } = await query;
+  if (queryErr) {
+    return NextResponse.json({ error: 'Error al consultar el inventario: ' + queryErr.message }, { status: 500 });
+  }
+  if (!itemsRaw?.length) {
+    return NextResponse.json({ error: 'No hay datos para exportar' }, { status: 404 });
+  }
 
-  // Flatten items
-  const flatItems = items.map((i: any) => ({
+  const items = itemsRaw as unknown as InventoryItemRow[];
+
+  const flatItems = items.map((i) => ({
     area_name: i.area?.name || '',
     product_name: i.product?.name || '',
     quantity: i.quantity,
@@ -163,6 +185,7 @@ export async function GET(request: Request) {
     headers: {
       'Content-Type': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
       'Content-Disposition': `attachment; filename="Inventario_LaComitiva_${dateStr}.xlsx"`,
+      'Cache-Control': 'no-store, max-age=0',
     },
   });
 }

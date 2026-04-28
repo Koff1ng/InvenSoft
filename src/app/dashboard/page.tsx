@@ -230,10 +230,26 @@ export default function DashboardPage() {
     return () => { supabase.removeChannel(channel); };
   }, [profile, supabase, loadData]);
 
+  const [exporting, setExporting] = useState(false);
   const exportExcel = async () => {
+    if (exporting) return;
+    setExporting(true);
     try {
-      const res = await fetch('/api/export');
-      if (!res.ok) { showToast('Error al exportar', 'error'); return; }
+      const res = await fetch('/api/export', { cache: 'no-store' });
+      const contentType = res.headers.get('content-type') || '';
+
+      if (!res.ok || !contentType.includes('spreadsheetml')) {
+        let message = 'Error al exportar';
+        if (contentType.includes('application/json')) {
+          try {
+            const data = await res.json();
+            if (data?.error) message = data.error;
+          } catch { /* ignore JSON parse errors */ }
+        }
+        showToast(message, res.status === 404 ? 'info' : 'error');
+        return;
+      }
+
       const blob = await res.blob();
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
@@ -243,8 +259,11 @@ export default function DashboardPage() {
       a.click();
       document.body.removeChild(a);
       URL.revokeObjectURL(url);
-    } catch (err) {
+      showToast('Exportación lista', 'success');
+    } catch {
       showToast('Error al exportar el archivo', 'error');
+    } finally {
+      setExporting(false);
     }
   };
 
@@ -329,9 +348,9 @@ export default function DashboardPage() {
             <h1 className="text-2xl font-bold">Dashboard Administrativo</h1>
             <p className="text-[var(--text-muted)] text-sm">Vista unificada del inventario</p>
           </div>
-          <button onClick={exportExcel} className="btn-secondary flex items-center gap-1.5 text-xs py-2 px-3">
+          <button onClick={exportExcel} disabled={exporting} className="btn-secondary flex items-center gap-1.5 text-xs py-2 px-3 disabled:opacity-60 disabled:cursor-not-allowed">
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
-            Exportar Excel
+            {exporting ? 'Generando…' : 'Exportar Excel'}
           </button>
         </div>
 

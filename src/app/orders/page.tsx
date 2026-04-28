@@ -284,10 +284,26 @@ export default function OrdersPage() {
   };
 
   // ── Export ──
+  const [exportingId, setExportingId] = useState<string | null>(null);
   const exportOrder = async (id: string) => {
+    if (exportingId) return;
+    setExportingId(id);
     try {
-      const res = await fetch(`/api/export-order?id=${id}`);
-      if (!res.ok) { showToast('Error al exportar', 'error'); return; }
+      const res = await fetch(`/api/export-order?id=${encodeURIComponent(id)}`, { cache: 'no-store' });
+      const contentType = res.headers.get('content-type') || '';
+
+      if (!res.ok || !contentType.includes('spreadsheetml')) {
+        let message = 'Error al exportar';
+        if (contentType.includes('application/json')) {
+          try {
+            const data = await res.json();
+            if (data?.error) message = data.error;
+          } catch { /* ignore */ }
+        }
+        showToast(message, res.status === 404 ? 'info' : 'error');
+        return;
+      }
+
       const blob = await res.blob();
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
@@ -297,7 +313,12 @@ export default function OrdersPage() {
       a.click();
       document.body.removeChild(a);
       URL.revokeObjectURL(url);
-    } catch { showToast('Error al exportar', 'error'); }
+      showToast('Pedido exportado', 'success');
+    } catch {
+      showToast('Error al exportar', 'error');
+    } finally {
+      setExportingId(null);
+    }
   };
 
   // Group items by category for detail view
@@ -385,7 +406,7 @@ export default function OrdersPage() {
                     <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
                   </button>
 
-                  <button onClick={() => exportOrder(o.id)} className="p-1.5 rounded-md hover:bg-[var(--bg-input)] text-[var(--text-muted)] hover:text-[var(--text)]" title="Exportar Excel">
+                  <button onClick={() => exportOrder(o.id)} disabled={exportingId === o.id} className="p-1.5 rounded-md hover:bg-[var(--bg-input)] text-[var(--text-muted)] hover:text-[var(--text)] disabled:opacity-50 disabled:cursor-not-allowed" title="Exportar Excel">
                     <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
                   </button>
 
@@ -409,10 +430,11 @@ export default function OrdersPage() {
             ))}
           </div>
         )}
+      </div>
 
-        {/* ─── CREATE FORM ─── */}
-        {showCreate && (
-          <div className="fixed inset-0 z-50 flex items-start justify-center pt-8 overflow-y-auto">
+      {/* ─── CREATE FORM ─── */}
+      {showCreate && (
+        <div className="fixed inset-0 z-50 flex items-start justify-center pt-8 overflow-y-auto">
             <div className="absolute inset-0 bg-black/50 backdrop-blur-sm" onClick={resetForm} />
             <div className="relative bg-[var(--bg-card)] border border-[var(--border)] rounded-xl shadow-2xl w-full max-w-2xl mx-4 mb-8 overflow-hidden">
               {/* Header */}
@@ -652,9 +674,9 @@ export default function OrdersPage() {
                 )}
 
                 <div className="flex gap-3 mt-6">
-                  <button onClick={() => exportOrder(detailOrder.id)} className="btn-primary flex-1 py-2.5 text-sm flex items-center justify-center gap-2">
+                  <button onClick={() => exportOrder(detailOrder.id)} disabled={exportingId === detailOrder.id} className="btn-primary flex-1 py-2.5 text-sm flex items-center justify-center gap-2 disabled:opacity-60 disabled:cursor-not-allowed">
                     <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
-                    Exportar Excel
+                    {exportingId === detailOrder.id ? 'Generando…' : 'Exportar Excel'}
                   </button>
                   {detailOrder.status === 'borrador' && (
                     <button onClick={() => sendOrder(detailOrder.id)} className="btn-secondary py-2.5 text-sm px-6 flex items-center justify-center gap-2">
@@ -673,7 +695,6 @@ export default function OrdersPage() {
             </div>
           </div>
         )}
-      </div>
     </>
   );
 }

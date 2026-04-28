@@ -45,6 +45,7 @@ function initSchema(db: Database.Database) {
       role TEXT NOT NULL CHECK (role IN ('admin','service_manager','kitchen_manager','bar_manager')),
       area_id TEXT REFERENCES areas(id),
       sede_id TEXT REFERENCES sedes(id),
+      username TEXT,
       created_at TEXT DEFAULT (datetime('now'))
     );
 
@@ -84,9 +85,10 @@ function initSchema(db: Database.Database) {
       area_id TEXT NOT NULL REFERENCES areas(id),
       sede_id TEXT REFERENCES sedes(id),
       created_by TEXT NOT NULL REFERENCES profiles(id),
-      status TEXT NOT NULL DEFAULT 'borrador' CHECK (status IN ('borrador','enviado')),
+      status TEXT NOT NULL DEFAULT 'borrador' CHECK (status IN ('borrador','enviado','aprobado')),
       category TEXT,
       notes TEXT,
+      items TEXT DEFAULT '[]',
       created_at TEXT DEFAULT (datetime('now'))
     );
 
@@ -97,6 +99,19 @@ function initSchema(db: Database.Database) {
       quantity REAL NOT NULL DEFAULT 0,
       unit TEXT NOT NULL DEFAULT 'unidades',
       notes TEXT
+    );
+
+    CREATE TABLE IF NOT EXISTS physical_counts (
+      id TEXT PRIMARY KEY DEFAULT (lower(hex(randomblob(16)))),
+      area_id TEXT NOT NULL REFERENCES areas(id),
+      submitted_by TEXT NOT NULL REFERENCES profiles(id),
+      reviewed_by TEXT REFERENCES profiles(id),
+      status TEXT NOT NULL DEFAULT 'pendiente' CHECK (status IN ('pendiente','aprobado','rechazado')),
+      items TEXT NOT NULL DEFAULT '[]',
+      notes TEXT,
+      review_notes TEXT,
+      created_at TEXT DEFAULT (datetime('now')),
+      reviewed_at TEXT
     );
   `);
 
@@ -127,7 +142,7 @@ function seedData(db: Database.Database) {
 
   for (const u of users) {
     db.prepare(`INSERT INTO users (id, email, password_hash) VALUES (?, ?, ?)`).run(u.id, u.email, hash);
-    db.prepare(`INSERT INTO profiles (id, full_name, role, area_id, sede_id) VALUES (?, ?, ?, ?, ?)`).run(u.id, u.name, u.role, u.area, u.sede);
+    db.prepare(`INSERT INTO profiles (id, full_name, role, area_id, sede_id, username) VALUES (?, ?, ?, ?, ?, ?)`).run(u.id, u.name, u.role, u.area, u.sede, u.email);
   }
 
   // Products — La Comitiva restaurant inventory
@@ -521,12 +536,12 @@ export function transferInventory(opts: {
   return { success: true };
 }
 
-export function createUser(email: string, password: string, fullName: string, role: string, areaId: string | null) {
+export function createUser(email: string, password: string, fullName: string, role: string, areaId: string | null, username?: string) {
   const db = getDb();
   const id = genId();
   const hash = bcrypt.hashSync(password, 10);
   db.prepare('INSERT INTO users (id, email, password_hash) VALUES (?, ?, ?)').run(id, email, hash);
-  db.prepare('INSERT INTO profiles (id, full_name, role, area_id) VALUES (?, ?, ?, ?)').run(id, fullName, role, areaId);
+  db.prepare('INSERT INTO profiles (id, full_name, role, area_id, username) VALUES (?, ?, ?, ?, ?)').run(id, fullName, role, areaId, username || email);
   return { id, email };
 }
 
@@ -601,10 +616,12 @@ function genId(): string {
 
 // ---- ORDERS ----
 
-export function createOrder(data: { area_id: string; sede_id?: string; created_by: string; category?: string; notes?: string; items: { product_name: string; quantity: number; unit: string; notes?: string }[] }) {
+export function createOrder(data: { area_id: string; sede_id?: string; created_by: string; category?: string; notes?: string; items: { product_name: string; quantity: number; unit: string; notes?: string; category?: string }[] }) {
   const db = getDb();
   const id = genId();
-  db.prepare('INSERT INTO orders (id, area_id, sede_id, created_by, category, notes) VALUES (?, ?, ?, ?, ?, ?)').run(id, data.area_id, data.sede_id || null, data.created_by, data.category || null, data.notes || null);
+  const itemsJson = JSON.stringify(data.items);
+  db.prepare('INSERT INTO orders (id, area_id, sede_id, created_by, category, notes, items) VALUES (?, ?, ?, ?, ?, ?, ?)').run(id, data.area_id, data.sede_id || null, data.created_by, data.category || null, data.notes || null, itemsJson);
+  // Also insert into order_items for backwards compatibility
   const insertItem = db.prepare('INSERT INTO order_items (id, order_id, product_name, quantity, unit, notes) VALUES (?, ?, ?, ?, ?, ?)');
   for (const item of data.items) {
     insertItem.run(genId(), id, item.product_name, item.quantity, item.unit, item.notes || null);
@@ -630,13 +647,18 @@ export function getOrders(opts: { areaId?: string; status?: string }) {
     ORDER BY o.created_at DESC
   `).all(...params) as Record<string, unknown>[];
 
-  return rows.map(r => ({
-    id: r.id, area_id: r.area_id, sede_id: r.sede_id, created_by: r.created_by, status: r.status,
-    category: r.category, notes: r.notes, created_at: r.created_at,
-    area: { name: r.area_name }, sede: r.sede_name ? { name: r.sede_name } : null,
-    creator: { full_name: r.creator_name },
-    item_count: r.item_count,
-  }));
+  return rows.map(r => {
+    let items: any[] = [];
+    try { items = JSON.parse(String(r.items || '[]')); } catch { /* empty */ }
+    return {
+      id: r.id, area_id: r.area_id, sede_id: r.sede_id, created_by: r.created_by, status: r.status,
+      category: r.category, notes: r.notes, created_at: r.created_at,
+      area: { name: r.area_name }, sede: r.sede_name ? { name: r.sede_name } : null,
+      creator: { full_name: r.creator_name },
+      items,
+      item_count: items.length || r.item_count,
+    };
+  });
 }
 
 export function getOrderById(id: string) {
@@ -650,15 +672,20 @@ export function getOrderById(id: string) {
     WHERE o.id = ?
   `).get(id) as Record<string, unknown> | undefined;
   if (!order) return null;
-
-  const items = db.prepare('SELECT * FROM order_items WHERE order_id = ? ORDER BY rowid').all(id) as Record<string, unknown>[];
+  // Prefer JSON items column; fallback to order_items table
+  let items: any[] = [];
+  try { items = JSON.parse(String(order.items || '[]')); } catch { /* empty */ }
+  if (items.length === 0) {
+    const itemRows = db.prepare('SELECT * FROM order_items WHERE order_id = ? ORDER BY rowid').all(id) as Record<string, unknown>[];
+    items = itemRows.map(i => ({ product_name: i.product_name, quantity: i.quantity, unit: i.unit, notes: i.notes }));
+  }
 
   return {
     id: order.id, area_id: order.area_id, sede_id: order.sede_id, created_by: order.created_by, status: order.status,
     category: order.category, notes: order.notes, created_at: order.created_at,
     area: { name: order.area_name }, sede: order.sede_name ? { name: order.sede_name } : null,
     creator: { full_name: order.creator_name },
-    items: items.map(i => ({ id: i.id, product_name: i.product_name, quantity: i.quantity, unit: i.unit, notes: i.notes })),
+    items,
   };
 }
 

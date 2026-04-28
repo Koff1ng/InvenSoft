@@ -68,7 +68,7 @@ CREATE TABLE IF NOT EXISTS public.orders (
   area_id UUID NOT NULL REFERENCES public.areas(id),
   sede_id UUID REFERENCES public.sedes(id),
   created_by UUID NOT NULL REFERENCES public.profiles(id),
-  status TEXT NOT NULL DEFAULT 'borrador' CHECK (status IN ('borrador', 'enviado')),
+  status TEXT NOT NULL DEFAULT 'borrador' CHECK (status IN ('borrador', 'enviado', 'aprobado')),
   category TEXT,
   notes TEXT,
   items JSONB DEFAULT '[]'::jsonb,

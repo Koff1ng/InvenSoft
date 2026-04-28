@@ -59,6 +59,7 @@ export default function OrdersPage() {
   const [blocks, setBlocks] = useState<OrderBlock[]>([
     { category: '', items: [emptyItem()] },
   ]);
+  const [customCats, setCustomCats] = useState<Record<number, boolean>>({});
   const [formLoading, setFormLoading] = useState(false);
   const [formError, setFormError] = useState('');
 
@@ -66,6 +67,21 @@ export default function OrdersPage() {
   const [detailOrder, setDetailOrder] = useState<Order | null>(null);
 
   const lastItemRef = useRef<HTMLInputElement>(null);
+
+  const enrichOrder = useCallback(async (o: any): Promise<Order> => {
+    const [areaRes, sedeRes, creatorRes] = await Promise.all([
+      o.area_id ? supabase.from('areas').select('name').eq('id', o.area_id).single() : { data: null },
+      o.sede_id ? supabase.from('sedes').select('name').eq('id', o.sede_id).single() : { data: null },
+      o.created_by ? supabase.from('profiles').select('full_name').eq('id', o.created_by).single() : { data: null },
+    ]);
+    return {
+      ...o,
+      area: areaRes.data ? { name: areaRes.data.name } : null,
+      sede: sedeRes.data ? { name: sedeRes.data.name } : null,
+      creator: creatorRes.data ? { full_name: creatorRes.data.full_name } : null,
+      item_count: Array.isArray(o.items) ? o.items.length : 0,
+    };
+  }, [supabase]);
 
   const loadOrders = useCallback(async () => {
     const { data: rawOrders } = await supabase.from('orders').select('*').order('created_at', { ascending: false });
@@ -166,6 +182,7 @@ export default function OrdersPage() {
   const resetForm = () => {
     setShowCreate(false);
     setBlocks([{ category: '', items: [emptyItem()] }]);
+    setCustomCats({});
     setOrderNotes('');
     setOrderArea(profile?.area_id || '');
     setOrderSede('');
@@ -226,7 +243,10 @@ export default function OrdersPage() {
   const sendOrder = async (id: string) => {
     await supabase.from('orders').update({ status: 'enviado' }).eq('id', id);
     loadOrders();
-    if (detailOrder?.id === id) setDetailOrder({ ...detailOrder, status: 'enviado' });
+    if (detailOrder?.id === id) {
+      const { data } = await supabase.from('orders').select('*').eq('id', id).single();
+      if (data) setDetailOrder(await enrichOrder(data));
+    }
   };
 
   // ── Delete order ──
@@ -242,16 +262,25 @@ export default function OrdersPage() {
   const approveOrder = async (id: string) => {
     const isConfirmed = await askConfirm('¿Aprobar este pedido?');
     if (!isConfirmed) return;
-    await supabase.from('orders').update({ status: 'aprobado' }).eq('id', id);
+    const { error } = await supabase.from('orders').update({ status: 'aprobado' }).eq('id', id);
+    if (error) {
+      showToast('Error al aprobar: ' + error.message, 'error');
+      return;
+    }
     showToast('Pedido aprobado correctamente', 'success');
     loadOrders();
-    if (detailOrder?.id === id) setDetailOrder({ ...detailOrder, status: 'aprobado' });
+    if (detailOrder?.id === id) {
+      const { data } = await supabase.from('orders').select('*').eq('id', id).single();
+      if (data) setDetailOrder(await enrichOrder(data));
+    }
   };
 
   // ── View detail ──
   const viewOrder = async (id: string) => {
     const { data } = await supabase.from('orders').select('*').eq('id', id).single();
-    setDetailOrder(data as Order);
+    if (data) {
+      setDetailOrder(await enrichOrder(data));
+    }
   };
 
   // ── Export ──
@@ -421,29 +450,42 @@ export default function OrdersPage() {
                     <div key={bIdx} className="border border-[var(--border)] rounded-xl overflow-hidden">
                       {/* Block header */}
                       <div className="flex items-center gap-2 px-4 py-3 bg-[var(--bg)] border-b border-[var(--border)]">
-                        <select
-                          value={block.category}
-                          onChange={e => updateBlockCategory(bIdx, e.target.value)}
-                          className="input-field text-sm flex-1 py-1.5"
-                        >
-                          <option value="">Seleccionar categoría...</option>
-                          {DEFAULT_CATEGORIES.map(cat => (
-                            <option key={cat} value={cat}>{cat}</option>
-                          ))}
-                          <option value="__custom">— Escribir otra —</option>
-                        </select>
-                        {block.category === '__custom' && (
-                          <input
-                            type="text"
-                            className="input-field text-sm flex-1 py-1.5"
-                            placeholder="Categoría personalizada"
-                            autoFocus
+                        {customCats[bIdx] ? (
+                          <div className="flex gap-1.5 flex-1">
+                            <input
+                              type="text"
+                              value={block.category}
+                              className="input-field text-sm flex-1 py-1.5"
+                              placeholder="Categoría personalizada"
+                              autoFocus
+                              onChange={e => updateBlockCategory(bIdx, e.target.value)}
+                            />
+                            <button type="button" onClick={() => {
+                              setCustomCats(prev => ({ ...prev, [bIdx]: false }));
+                              updateBlockCategory(bIdx, '');
+                            }} className="p-1.5 rounded-md hover:bg-[var(--bg-input)] text-[var(--text-muted)]" title="Usar lista">
+                              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+                            </button>
+                          </div>
+                        ) : (
+                          <select
+                            value={block.category}
                             onChange={e => {
-                              const copy = [...blocks];
-                              copy[bIdx] = { ...copy[bIdx], category: e.target.value };
-                              setBlocks(copy);
+                              if (e.target.value === '__custom') {
+                                setCustomCats(prev => ({ ...prev, [bIdx]: true }));
+                                updateBlockCategory(bIdx, '');
+                              } else {
+                                updateBlockCategory(bIdx, e.target.value);
+                              }
                             }}
-                          />
+                            className="input-field text-sm flex-1 py-1.5"
+                          >
+                            <option value="">Seleccionar categoría...</option>
+                            {DEFAULT_CATEGORIES.map(cat => (
+                              <option key={cat} value={cat}>{cat}</option>
+                            ))}
+                            <option value="__custom">— Escribir otra —</option>
+                          </select>
                         )}
                         {blocks.length > 1 && (
                           <button type="button" onClick={() => removeBlock(bIdx)} className="p-1.5 rounded-md hover:bg-red-500/10 text-[var(--text-muted)] hover:text-red-400" title="Eliminar bloque">

@@ -63,6 +63,11 @@ export async function POST(request: NextRequest) {
       db.updateProfile(filters.id, data);
       return NextResponse.json({ data: null, error: null });
     }
+    if (operation === 'delete') {
+      if (!filters?.id) return NextResponse.json({ error: 'Missing id' }, { status: 400 });
+      db.deleteUser(filters.id);
+      return NextResponse.json({ data: null, error: null });
+    }
   }
 
   // ---- PRODUCTS ----
@@ -190,6 +195,52 @@ export async function POST(request: NextRequest) {
   if (table === 'order_categories') {
     const cats = db.getOrderCategories();
     return NextResponse.json({ data: cats, error: null });
+  }
+
+  // ---- PHYSICAL COUNTS ----
+  if (table === 'physical_counts') {
+    const localDb = db.getDb();
+    if (operation === 'select') {
+      let where = '1=1';
+      const params: unknown[] = [];
+      if (filters?.submitted_by) { where += ' AND pc.submitted_by = ?'; params.push(filters.submitted_by); }
+
+      const rows = localDb.prepare(`
+        SELECT pc.*, a.name as area_name
+        FROM physical_counts pc
+        LEFT JOIN areas a ON pc.area_id = a.id
+        WHERE ${where}
+        ORDER BY pc.created_at DESC
+      `).all(...params) as Record<string, unknown>[];
+
+      const enriched = rows.map((r: any) => {
+        let items: any[] = [];
+        try { items = JSON.parse(String(r.items || '[]')); } catch { /* empty */ }
+        return {
+          ...r,
+          items,
+          area: r.area_name ? { name: r.area_name } : null,
+        };
+      });
+
+      return NextResponse.json({ data: enriched, error: null });
+    }
+    if (operation === 'insert') {
+      const genId = () => Array.from(crypto.getRandomValues(new Uint8Array(16))).map(b => b.toString(16).padStart(2, '0')).join('');
+      const id = genId();
+      const itemsJson = JSON.stringify(data.items || []);
+      localDb.prepare('INSERT INTO physical_counts (id, area_id, submitted_by, notes, items) VALUES (?, ?, ?, ?, ?)').run(
+        id, data.area_id, data.submitted_by, data.notes || null, itemsJson
+      );
+      return NextResponse.json({ data: { id }, error: null });
+    }
+    if (operation === 'update') {
+      if (!filters?.id) return NextResponse.json({ error: 'Missing id' }, { status: 400 });
+      const sets = Object.entries(data).map(([k]) => `${k} = ?`);
+      const vals = Object.values(data);
+      localDb.prepare(`UPDATE physical_counts SET ${sets.join(', ')} WHERE id = ?`).run(...vals, filters.id);
+      return NextResponse.json({ data: null, error: null });
+    }
   }
 
   return NextResponse.json({ error: `Unknown: ${table}/${operation}` }, { status: 400 });

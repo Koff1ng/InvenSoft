@@ -338,7 +338,7 @@ export default function InventoryPage() {
             <p className="text-[var(--text-muted)] text-xs mt-0.5">{areaName}</p>
           </div>
           <div className="flex gap-2 flex-wrap">
-            <Link href="/inventory/count" className="btn-secondary flex items-center gap-1.5 text-xs py-2 px-3">
+            <Link href="/inventory/count" className="btn-accent flex items-center gap-1.5 text-xs py-2 px-3">
               <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M9 11l3 3L22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/></svg>
               Conteo físico
             </Link>

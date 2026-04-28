@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
 
+const IS_CLOUD = !!(process.env.NEXT_PUBLIC_SUPABASE_URL && process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY);
+
 // Admin API: uses service_role key to manage users without affecting current session
 function getAdminClient() {
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL!;
@@ -32,6 +34,18 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'La contraseña debe tener al menos 6 caracteres' }, { status: 400 });
     }
 
+    // ── LOCAL MODE (SQLite) ──
+    if (!IS_CLOUD) {
+      try {
+        const { createUser } = await import('@/lib/local-db');
+        const user = createUser(username.trim(), password, full_name, role, role === 'admin' ? null : area_id || null, username.trim());
+        return NextResponse.json({ success: true, id: user.id });
+      } catch (err: any) {
+        return NextResponse.json({ error: err?.message || 'Error al crear usuario local' }, { status: 400 });
+      }
+    }
+
+    // ── CLOUD MODE (Supabase) ──
     const admin = getAdminClient();
     const authEmail = toAuthEmail(username.trim());
 

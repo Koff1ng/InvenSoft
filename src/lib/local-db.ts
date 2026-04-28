@@ -461,77 +461,86 @@ export function transferInventory(opts: {
   notes: string;
 }) {
   const db = getDb();
-  // Get source item with product info
-  const source = db.prepare(`
+
+  // Single transaction: without this, a crash or error after decrementing the source
+  // leaves stock removed and never credited at the destination (data loss).
+  const txn = db.transaction(() => {
+    const source = db.prepare(`
     SELECT ii.*, p.name as pname, p.unit as punit, p.category as pcat, p.notes as pnotes, p.area_id as paid
     FROM inventory_items ii JOIN products p ON ii.product_id = p.id
     WHERE ii.id = ?
   `).get(opts.sourceItemId) as Record<string, unknown> | undefined;
-  if (!source) throw new Error('Item no encontrado');
+    if (!source) throw new Error('Item no encontrado');
 
-  const currentQty = Number(source.quantity) || 0;
-  if (opts.quantity > currentQty) throw new Error('Cantidad insuficiente para transferir');
+    const currentQty = Number(source.quantity) || 0;
+    if (opts.quantity > currentQty) throw new Error('Cantidad insuficiente para transferir');
 
-  // Subtract from source
-  const newSrcQty = currentQty - opts.quantity;
-  db.prepare('UPDATE inventory_items SET quantity = ?, updated_at = datetime(\'now\'), updated_by = ? WHERE id = ?')
-    .run(newSrcQty, opts.updatedBy, opts.sourceItemId);
+    const decRow = db.prepare(`
+    UPDATE inventory_items
+    SET quantity = quantity - ?, updated_at = datetime('now'), updated_by = ?
+    WHERE id = ? AND quantity >= ?
+    RETURNING quantity
+  `).get(opts.quantity, opts.updatedBy, opts.sourceItemId, opts.quantity) as { quantity: number } | undefined;
+    if (!decRow) throw new Error('Cantidad insuficiente para transferir');
 
-  // Log source deduction
-  createInventoryUpdate({
-    inventory_item_id: opts.sourceItemId,
-    previous_qty: currentQty,
-    new_qty: newSrcQty,
-    updated_by: opts.updatedBy,
-    notes: `📤 Transferencia salida: ${opts.notes}`,
+    const newSrcQty = Number(decRow.quantity) || 0;
+    const previousSrcQty = newSrcQty + opts.quantity;
+
+    createInventoryUpdate({
+      inventory_item_id: opts.sourceItemId,
+      previous_qty: previousSrcQty,
+      new_qty: newSrcQty,
+      updated_by: opts.updatedBy,
+      notes: `📤 Transferencia salida: ${opts.notes}`,
+    });
+
+    const existingProduct = db.prepare(
+      'SELECT id FROM products WHERE name = ? AND area_id = ? AND sede_id = ?'
+    ).get(String(source.pname), String(source.paid), opts.targetSedeId) as { id: string } | undefined;
+
+    let targetProductId: string;
+    if (existingProduct) {
+      targetProductId = existingProduct.id;
+    } else {
+      targetProductId = genId();
+      db.prepare('INSERT INTO products (id, area_id, sede_id, name, unit, category, notes) VALUES (?, ?, ?, ?, ?, ?, ?)').run(
+        targetProductId, String(source.paid), opts.targetSedeId,
+        String(source.pname), String(source.punit), source.pcat || null, source.pnotes || null
+      );
+    }
+
+    const existingItem = db.prepare(
+      'SELECT id, quantity FROM inventory_items WHERE product_id = ? AND sede_id = ?'
+    ).get(targetProductId, opts.targetSedeId) as { id: string; quantity: number } | undefined;
+
+    if (existingItem) {
+      const prevQty = Number(existingItem.quantity) || 0;
+      const newQty = prevQty + opts.quantity;
+      db.prepare('UPDATE inventory_items SET quantity = ?, updated_at = datetime(\'now\'), updated_by = ? WHERE id = ?')
+        .run(newQty, opts.updatedBy, existingItem.id);
+      createInventoryUpdate({
+        inventory_item_id: existingItem.id,
+        previous_qty: prevQty,
+        new_qty: newQty,
+        updated_by: opts.updatedBy,
+        notes: `📥 Transferencia entrada: ${opts.notes}`,
+      });
+    } else {
+      const newItemId = genId();
+      db.prepare('INSERT INTO inventory_items (id, product_id, area_id, sede_id, quantity, updated_by) VALUES (?, ?, ?, ?, ?, ?)').run(
+        newItemId, targetProductId, String(source.paid), opts.targetSedeId, opts.quantity, opts.updatedBy
+      );
+      createInventoryUpdate({
+        inventory_item_id: newItemId,
+        previous_qty: 0,
+        new_qty: opts.quantity,
+        updated_by: opts.updatedBy,
+        notes: `📥 Transferencia entrada: ${opts.notes}`,
+      });
+    }
   });
 
-  // Find or create matching product in target sede
-  const existingProduct = db.prepare(
-    'SELECT id FROM products WHERE name = ? AND area_id = ? AND sede_id = ?'
-  ).get(String(source.pname), String(source.paid), opts.targetSedeId) as { id: string } | undefined;
-
-  let targetProductId: string;
-  if (existingProduct) {
-    targetProductId = existingProduct.id;
-  } else {
-    targetProductId = genId();
-    db.prepare('INSERT INTO products (id, area_id, sede_id, name, unit, category, notes) VALUES (?, ?, ?, ?, ?, ?, ?)').run(
-      targetProductId, String(source.paid), opts.targetSedeId,
-      String(source.pname), String(source.punit), source.pcat || null, source.pnotes || null
-    );
-  }
-
-  // Find or create inventory item in target sede
-  const existingItem = db.prepare(
-    'SELECT id, quantity FROM inventory_items WHERE product_id = ? AND sede_id = ?'
-  ).get(targetProductId, opts.targetSedeId) as { id: string; quantity: number } | undefined;
-
-  if (existingItem) {
-    const prevQty = Number(existingItem.quantity) || 0;
-    const newQty = prevQty + opts.quantity;
-    db.prepare('UPDATE inventory_items SET quantity = ?, updated_at = datetime(\'now\'), updated_by = ? WHERE id = ?')
-      .run(newQty, opts.updatedBy, existingItem.id);
-    createInventoryUpdate({
-      inventory_item_id: existingItem.id,
-      previous_qty: prevQty,
-      new_qty: newQty,
-      updated_by: opts.updatedBy,
-      notes: `📥 Transferencia entrada: ${opts.notes}`,
-    });
-  } else {
-    const newItemId = genId();
-    db.prepare('INSERT INTO inventory_items (id, product_id, area_id, sede_id, quantity, updated_by) VALUES (?, ?, ?, ?, ?, ?)').run(
-      newItemId, targetProductId, String(source.paid), opts.targetSedeId, opts.quantity, opts.updatedBy
-    );
-    createInventoryUpdate({
-      inventory_item_id: newItemId,
-      previous_qty: 0,
-      new_qty: opts.quantity,
-      updated_by: opts.updatedBy,
-      notes: `📥 Transferencia entrada: ${opts.notes}`,
-    });
-  }
+  txn();
 
   return { success: true };
 }

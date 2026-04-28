@@ -1,7 +1,63 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
+import { cookies } from 'next/headers';
+import { createServerClient } from '@supabase/ssr';
 
 const IS_CLOUD = !!(process.env.NEXT_PUBLIC_SUPABASE_URL && process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY);
+
+/** Reject unless the caller is an authenticated admin (prevents unauthenticated abuse of service_role). */
+async function requireAdmin(req: NextRequest): Promise<NextResponse | null> {
+  if (!IS_CLOUD) {
+    const { getUserFromRequest } = await import('@/app/api/local-auth/route');
+    const user = getUserFromRequest(req);
+    if (!user) {
+      return NextResponse.json({ error: 'No autorizado' }, { status: 401 });
+    }
+    const { getProfileById } = await import('@/lib/local-db');
+    const profile = getProfileById(user.id);
+    if (!profile || profile.role !== 'admin') {
+      return NextResponse.json({ error: 'No autorizado' }, { status: 403 });
+    }
+    return null;
+  }
+
+  const url = process.env.NEXT_PUBLIC_SUPABASE_URL!;
+  const anonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!;
+  const cookieStore = await cookies();
+  const supabase = createServerClient(url, anonKey, {
+    cookies: {
+      getAll() {
+        return cookieStore.getAll();
+      },
+      setAll(cookiesToSet) {
+        try {
+          for (const { name, value, options } of cookiesToSet) {
+            cookieStore.set(name, value, options);
+          }
+        } catch {
+          /* cookie writes only in Route Handlers / Server Actions */
+        }
+      },
+    },
+  });
+
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) {
+    return NextResponse.json({ error: 'No autorizado' }, { status: 401 });
+  }
+
+  const { data: profile } = await supabase
+    .from('profiles')
+    .select('role')
+    .eq('id', user.id)
+    .single();
+
+  if (!profile || profile.role !== 'admin') {
+    return NextResponse.json({ error: 'No autorizado' }, { status: 403 });
+  }
+
+  return null;
+}
 
 // Admin API: uses service_role key to manage users without affecting current session
 function getAdminClient() {
@@ -21,6 +77,9 @@ function toAuthEmail(username: string): string {
 
 export async function POST(req: NextRequest) {
   try {
+    const authErr = await requireAdmin(req);
+    if (authErr) return authErr;
+
     const body = await req.json();
     const { username, password, full_name, role, area_id } = body;
 
@@ -88,6 +147,9 @@ export async function POST(req: NextRequest) {
 // require admin/service_role privileges that the browser session doesn't have.
 export async function PATCH(req: NextRequest) {
   try {
+    const authErr = await requireAdmin(req);
+    if (authErr) return authErr;
+
     const body = await req.json();
     const { id, password, username } = body as { id?: string; password?: string; username?: string };
 
@@ -126,8 +188,8 @@ export async function PATCH(req: NextRequest) {
     if (password) updatePayload.password = password;
     if (username) updatePayload.email = toAuthEmail(username.trim());
 
-    const { error: authErr } = await admin.auth.admin.updateUserById(id, updatePayload);
-    if (authErr) return NextResponse.json({ error: authErr.message }, { status: 400 });
+    const { error: updateAuthErr } = await admin.auth.admin.updateUserById(id, updatePayload);
+    if (updateAuthErr) return NextResponse.json({ error: updateAuthErr.message }, { status: 400 });
 
     if (username) {
       const { error: profErr } = await admin

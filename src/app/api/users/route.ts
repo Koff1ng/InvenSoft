@@ -1,5 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
+import { createServerClient } from '@supabase/ssr';
+import { cookies } from 'next/headers';
 
 const IS_CLOUD = !!(process.env.NEXT_PUBLIC_SUPABASE_URL && process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY);
 
@@ -88,6 +90,47 @@ export async function POST(req: NextRequest) {
 // require admin/service_role privileges that the browser session doesn't have.
 export async function PATCH(req: NextRequest) {
   try {
+    if (IS_CLOUD) {
+      const url = process.env.NEXT_PUBLIC_SUPABASE_URL!;
+      const anon = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!;
+      const cookieStore = await cookies();
+      const supabase = createServerClient(url, anon, {
+        cookies: {
+          getAll() {
+            return cookieStore.getAll();
+          },
+          setAll() {
+            /* read-only */
+          },
+        },
+      });
+      const {
+        data: { user },
+      } = await supabase.auth.getUser();
+      if (!user) {
+        return NextResponse.json({ error: 'No autenticado' }, { status: 401 });
+      }
+      const { data: callerProfile } = await supabase
+        .from('profiles')
+        .select('role')
+        .eq('id', user.id)
+        .single();
+      if (!callerProfile || callerProfile.role !== 'admin') {
+        return NextResponse.json({ error: 'No autorizado' }, { status: 403 });
+      }
+    } else {
+      const { getUserFromRequest } = await import('@/app/api/local-auth/route');
+      const { getProfileById } = await import('@/lib/local-db');
+      const sessionUser = getUserFromRequest(req);
+      if (!sessionUser) {
+        return NextResponse.json({ error: 'No autenticado' }, { status: 401 });
+      }
+      const callerProfile = getProfileById(sessionUser.id);
+      if (!callerProfile || callerProfile.role !== 'admin') {
+        return NextResponse.json({ error: 'No autorizado' }, { status: 403 });
+      }
+    }
+
     const body = await req.json();
     const { id, password, username } = body as { id?: string; password?: string; username?: string };
 

@@ -28,8 +28,31 @@ export default function LoginPage() {
     setLoading(true);
 
     try {
-      // If username doesn't contain @, append fake domain
-      const authEmail = email.includes('@') ? email : `${email.toLowerCase().replace(/\s+/g, '')}@lacomitiva.local`;
+      const trimmed = email.trim();
+      const fallback = trimmed.includes('@')
+        ? trimmed
+        : `${trimmed.toLowerCase().replace(/\s+/g, '')}@lacomitiva.local`;
+
+      // Resolve username → real auth email via server endpoint (uses
+      // SUPABASE_SERVICE_ROLE_KEY to look up profiles + auth.users). This way,
+      // users whose auth email is NOT username@lacomitiva.local (e.g. legacy
+      // accounts with real emails) can still log in by typing just their username.
+      let authEmail = fallback;
+      try {
+        const res = await fetch('/api/resolve-username', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ username: trimmed }),
+        });
+        if (res.ok) {
+          const data = await res.json();
+          if (data?.email && typeof data.email === 'string') {
+            authEmail = data.email;
+          }
+        }
+      } catch {
+        // If resolver fails, fall through to the synthesized email.
+      }
 
       const { error, data } = await supabase.auth.signInWithPassword({
         email: authEmail,

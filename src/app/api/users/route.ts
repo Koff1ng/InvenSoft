@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
+import { shouldSyncAuthEmailForLoginUpdate, toAuthEmail } from '@/lib/lacomitiva-auth';
 
 const IS_CLOUD = !!(process.env.NEXT_PUBLIC_SUPABASE_URL && process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY);
 
@@ -11,12 +12,6 @@ function getAdminClient() {
     return createClient(url, process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!);
   }
   return createClient(url, serviceKey, { auth: { autoRefreshToken: false, persistSession: false } });
-}
-
-// Convert username → email for Supabase Auth
-function toAuthEmail(username: string): string {
-  if (username.includes('@')) return username;
-  return `${username.toLowerCase().replace(/\s+/g, '')}@lacomitiva.local`;
 }
 
 export async function POST(req: NextRequest) {
@@ -124,10 +119,29 @@ export async function PATCH(req: NextRequest) {
     const admin = getAdminClient();
     const updatePayload: { password?: string; email?: string } = {};
     if (password) updatePayload.password = password;
-    if (username) updatePayload.email = toAuthEmail(username.trim());
 
-    const { error: authErr } = await admin.auth.admin.updateUserById(id, updatePayload);
-    if (authErr) return NextResponse.json({ error: authErr.message }, { status: 400 });
+    let skipAuthUpdate = false;
+    if (username) {
+      const { data: authUser, error: getUserErr } = await admin.auth.admin.getUserById(id);
+      if (getUserErr || !authUser?.user) {
+        return NextResponse.json(
+          { error: getUserErr?.message || 'Usuario no encontrado en Auth' },
+          { status: 400 },
+        );
+      }
+      const currentEmail = authUser.user.email;
+      if (shouldSyncAuthEmailForLoginUpdate(currentEmail, username)) {
+        updatePayload.email = toAuthEmail(username.trim());
+      } else {
+        // Display-only username change: do not call Auth with an empty payload.
+        skipAuthUpdate = !password;
+      }
+    }
+
+    if (!skipAuthUpdate) {
+      const { error: authErr } = await admin.auth.admin.updateUserById(id, updatePayload);
+      if (authErr) return NextResponse.json({ error: authErr.message }, { status: 400 });
+    }
 
     if (username) {
       const { error: profErr } = await admin

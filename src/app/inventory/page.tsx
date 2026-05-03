@@ -219,58 +219,95 @@ export default function InventoryPage() {
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) { setTransferLoading(false); return; }
 
-    try {
-      const now = new Date().toISOString();
-      const destSedeName = sedes.find(s => s.id === transferSede)?.name || 'otra sede';
-      const sourceSedeName = sedes.find(s => s.id === transferItem.sede_id)?.name || 'sede origen';
+    const item = transferItem;
+    const now = new Date().toISOString();
+    const destSedeName = sedes.find(s => s.id === transferSede)?.name || 'otra sede';
+    const sourceSedeName = sedes.find(s => s.id === item.sede_id)?.name || 'sede origen';
 
+    const revertSourceQty = async () => {
+      await supabase.from('inventory_items').update({
+        quantity: item.quantity,
+        updated_at: now,
+        updated_by: user.id,
+      }).eq('id', item.id);
+    };
+
+    try {
       // 1. Reduce source quantity
-      const newSourceQty = transferItem.quantity - qty;
+      const newSourceQty = item.quantity - qty;
       const { error: srcErr } = await supabase.from('inventory_items').update({
         quantity: newSourceQty, updated_at: now, updated_by: user.id,
-      }).eq('id', transferItem.id);
+      }).eq('id', item.id);
 
-      if (srcErr) { setTransferError(srcErr.message); setTransferLoading(false); return; }
+      if (srcErr) {
+        setTransferError(srcErr.message);
+        return;
+      }
 
-      // Log source reduction
-      await supabase.from('inventory_updates').insert({
-        inventory_item_id: transferItem.id,
-        previous_qty: transferItem.quantity,
+      const { error: srcLogErr } = await supabase.from('inventory_updates').insert({
+        inventory_item_id: item.id,
+        previous_qty: item.quantity,
         new_qty: newSourceQty,
         updated_by: user.id,
-        notes: `Transferencia a ${destSedeName}: -${qty} ${transferItem.product?.unit || ''} — ${transferNotes.trim()}`,
+        notes: `Transferencia a ${destSedeName}: -${qty} ${item.product?.unit || ''} — ${transferNotes.trim()}`,
       });
 
-      // 2. Find or create destination inventory_item
-      const { data: existingDest } = await supabase
+      if (srcLogErr) {
+        await revertSourceQty();
+        setTransferError(srcLogErr.message);
+        return;
+      }
+
+      const { data: existingDest, error: destLookupErr } = await supabase
         .from('inventory_items')
         .select('id, quantity')
-        .eq('product_id', transferItem.product_id)
-        .eq('area_id', transferItem.area_id)
+        .eq('product_id', item.product_id)
+        .eq('area_id', item.area_id)
         .eq('sede_id', transferSede)
         .maybeSingle();
 
+      if (destLookupErr) {
+        await revertSourceQty();
+        setTransferError(destLookupErr.message);
+        return;
+      }
+
       if (existingDest) {
-        // Add to existing
         const newDestQty = existingDest.quantity + qty;
-        await supabase.from('inventory_items').update({
+        const { error: destUpErr } = await supabase.from('inventory_items').update({
           quantity: newDestQty, updated_at: now, updated_by: user.id,
         }).eq('id', existingDest.id);
 
-        await supabase.from('inventory_updates').insert({
+        if (destUpErr) {
+          await revertSourceQty();
+          setTransferError(destUpErr.message);
+          return;
+        }
+
+        const { error: destLogErr } = await supabase.from('inventory_updates').insert({
           inventory_item_id: existingDest.id,
           previous_qty: existingDest.quantity,
           new_qty: newDestQty,
           updated_by: user.id,
-          notes: `Transferencia desde ${sourceSedeName}: +${qty} ${transferItem.product?.unit || ''} — ${transferNotes.trim()}`,
+          notes: `Transferencia desde ${sourceSedeName}: +${qty} ${item.product?.unit || ''} — ${transferNotes.trim()}`,
         });
+
+        if (destLogErr) {
+          await supabase.from('inventory_items').update({
+            quantity: existingDest.quantity,
+            updated_at: now,
+            updated_by: user.id,
+          }).eq('id', existingDest.id);
+          await revertSourceQty();
+          setTransferError(destLogErr.message);
+          return;
+        }
       } else {
-        // Create new inventory_item at destination
         const { data: newItem, error: newErr } = await supabase
           .from('inventory_items')
           .insert({
-            product_id: transferItem.product_id,
-            area_id: transferItem.area_id,
+            product_id: item.product_id,
+            area_id: item.area_id,
             sede_id: transferSede,
             quantity: qty,
             updated_by: user.id,
@@ -278,22 +315,34 @@ export default function InventoryPage() {
           .select('id')
           .single();
 
-        if (newErr) { setTransferError(newErr.message); setTransferLoading(false); return; }
+        if (newErr || !newItem) {
+          await revertSourceQty();
+          setTransferError(newErr?.message || 'No se pudo crear la fila en destino');
+          return;
+        }
 
-        await supabase.from('inventory_updates').insert({
+        const { error: destLogErr } = await supabase.from('inventory_updates').insert({
           inventory_item_id: newItem.id,
           previous_qty: 0,
           new_qty: qty,
           updated_by: user.id,
-          notes: `Transferencia desde ${sourceSedeName}: +${qty} ${transferItem.product?.unit || ''} — ${transferNotes.trim()}`,
+          notes: `Transferencia desde ${sourceSedeName}: +${qty} ${item.product?.unit || ''} — ${transferNotes.trim()}`,
         });
+
+        if (destLogErr) {
+          await supabase.from('inventory_items').delete().eq('id', newItem.id);
+          await revertSourceQty();
+          setTransferError(destLogErr.message);
+          return;
+        }
       }
 
       setTransferItem(null);
-      setTransferLoading(false);
       loadData();
-    } catch (err: any) {
-      setTransferError(err.message || 'Error inesperado');
+    } catch (err: unknown) {
+      await revertSourceQty();
+      setTransferError(err instanceof Error ? err.message : 'Error inesperado');
+    } finally {
       setTransferLoading(false);
     }
   };

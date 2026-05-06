@@ -73,7 +73,6 @@ export default function HistoryPage() {
     if (!updates.length) {
       setEntries([]);
       setTotalCount(count || 0);
-      setLoading(false);
       return;
     }
 

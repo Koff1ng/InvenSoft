@@ -48,6 +48,7 @@ export default function PhysicalCountPage() {
   const [detailCount, setDetailCount] = useState<PhysicalCount | null>(null);
   const [reviewNotes, setReviewNotes] = useState('');
   const [reviewLoading, setReviewLoading] = useState(false);
+  const [exportingId, setExportingId] = useState<string | null>(null);
 
   const loadCounts = useCallback(async (prof: Profile) => {
     let query = supabase.from('physical_counts').select('*').order('created_at', { ascending: false });
@@ -229,6 +230,37 @@ export default function PhysicalCountPage() {
     setReviewNotes('');
     setReviewLoading(false);
     if (profile) loadCounts(profile);
+  };
+
+  // ── Export count as Excel ──
+  const exportCount = async (id: string) => {
+    if (exportingId) return;
+    setExportingId(id);
+    try {
+      const res = await fetch(`/api/export-count?id=${encodeURIComponent(id)}`, { cache: 'no-store' });
+      const contentType = res.headers.get('content-type') || '';
+      if (!res.ok || !contentType.includes('spreadsheetml')) {
+        let msg = 'Error al exportar';
+        if (contentType.includes('json')) {
+          try { const d = await res.json(); if (d?.error) msg = d.error; } catch { /* */ }
+        }
+        alert(msg);
+        return;
+      }
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `Conteo_${new Date().toISOString().split('T')[0]}.xlsx`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+    } catch {
+      alert('Error al exportar');
+    } finally {
+      setExportingId(null);
+    }
   };
 
   const statusBadge = (status: string) => {
@@ -450,6 +482,20 @@ export default function PhysicalCountPage() {
                         Rechazar
                       </button>
                     </div>
+                  </div>
+                )}
+
+                {/* Export button — admin can export any count */}
+                {profile?.role === 'admin' && (
+                  <div className="pt-2 border-t border-[var(--border)]">
+                    <button
+                      onClick={() => exportCount(detailCount.id)}
+                      disabled={exportingId === detailCount.id}
+                      className="btn-primary w-full py-2.5 text-sm font-medium flex items-center justify-center gap-2 disabled:opacity-50"
+                    >
+                      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+                      {exportingId === detailCount.id ? 'Generando…' : 'Exportar Excel (Formato Inventario)'}
+                    </button>
                   </div>
                 )}
               </div>

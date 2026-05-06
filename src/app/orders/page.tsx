@@ -42,11 +42,11 @@ interface CatalogProduct {
   category: string;
 }
 
-const UNITS = ['unidades', 'kg', 'lb', 'litros', 'paquetes', 'cajas', 'botellas', 'gramos', 'onzas'];
+const UNITS = ['GR', 'ML', 'OZ', 'UND', 'UNID', 'UNIDAD', 'KG', 'LB', 'LT'];
 const DEFAULT_CATEGORIES = ['Abarrotes', 'Fruver'];
 
 function emptyItem(): OrderItem {
-  return { product_name: '', quantity: '', unit: 'unidades', notes: '' };
+  return { product_name: '', quantity: '', unit: 'UND', notes: '' };
 }
 
 function ProductAutocomplete({

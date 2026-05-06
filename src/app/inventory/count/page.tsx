@@ -101,14 +101,21 @@ export default function PhysicalCountPage() {
     init();
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Load products for the form
   const openForm = async () => {
     if (!profile) return;
     const areaId = profile.area_id;
-    if (!areaId && profile.role !== 'admin') return;
+    if (!areaId && profile.role !== 'admin') {
+      setFormError('Tu perfil no tiene un área asignada. Contacta al administrador.');
+      return;
+    }
 
     let query = supabase.from('inventory_items').select('id, area_id, quantity, product:products(name, unit), area:areas(name)');
-    if (profile.role !== 'admin') query = query.eq('area_id', areaId!);
+    if (profile.role !== 'admin') {
+      // Include items from the user's area AND any child sub-areas
+      const childAreas = await supabase.from('areas').select('id').eq('parent_id', areaId!);
+      const areaIds = [areaId!, ...(childAreas.data || []).map((a: any) => a.id)];
+      query = query.in('area_id', areaIds);
+    }
 
     const { data } = await query;
     if (!data?.length) { setFormError('No hay productos en tu área'); return; }
@@ -123,8 +130,7 @@ export default function PhysicalCountPage() {
     })));
     setShowForm(true);
     setFormError('');
-    setCountNotes('');
-  };
+    setCountNotes('');\n  };
 
   const handleSubmit = async () => {
     setFormLoading(true);
@@ -267,6 +273,10 @@ export default function PhysicalCountPage() {
             </button>
           )}
         </div>
+
+        {formError && !showForm && (
+          <div className="text-sm text-red-400 bg-red-900/15 px-4 py-3 rounded-lg mb-4">{formError}</div>
+        )}
 
         {/* Counts list */}
         {counts.length === 0 ? (

@@ -209,12 +209,10 @@ export default function OrdersPage() {
   }, [authLoading, profile]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const filteredOrders = profile?.role === 'admin'
-    ? orders.filter(o => o.status !== 'borrador' || o.created_by === profile?.id)
+    ? orders
     : orders.filter(o => {
         const myAreaIds = [profile?.area_id, ...areas.filter(a => a.parent_id === profile?.area_id).map(a => a.id)];
-        if (!myAreaIds.includes(o.area_id)) return false;
-        if (o.status === 'borrador' && o.created_by !== profile?.id) return false;
-        return true;
+        return myAreaIds.includes(o.area_id);
       });
 
   // ── Block helpers ──
@@ -318,13 +316,14 @@ export default function OrdersPage() {
       category: categoryLabel,
       notes: orderNotes || null,
       items: allItems,
+      status: 'enviado',
     });
 
     if (error) { setFormError(error.message); setFormLoading(false); return; }
 
     resetForm();
     setFormLoading(false);
-    showToast('Pedido creado exitosamente', 'success');
+    showToast('Pedido enviado exitosamente', 'success');
     await loadOrders();
   };
 
@@ -349,7 +348,7 @@ export default function OrdersPage() {
   // ── Delete order ──
   const deleteOrder = async (id: string) => {
     const order = orders.find(o => o.id === id);
-    if (!order || order.status !== 'borrador') { showToast('Solo se pueden eliminar borradores', 'error'); return; }
+    if (!order) return;
     if (order.created_by !== profile?.id && profile?.role !== 'admin') { showToast('No autorizado', 'error'); return; }
     const isConfirmed = await askConfirm('¿Eliminar este pedido?');
     if (!isConfirmed) return;
@@ -507,7 +506,7 @@ export default function OrdersPage() {
 
                 <div className="flex items-center gap-2 pl-11 sm:pl-0">
                   <span className={`text-xs font-medium px-2.5 py-1 rounded-full ${o.status === 'aprobado' ? 'bg-blue-500/15 text-blue-400' : o.status === 'enviado' ? 'bg-green-500/15 text-green-400' : 'bg-yellow-500/15 text-yellow-400'}`}>
-                    {o.status === 'aprobado' ? 'Aprobado' : o.status === 'enviado' ? 'Enviado' : 'Borrador'}
+                    {o.status === 'aprobado' ? 'Aprobado' : 'Enviado'}
                   </span>
 
                   <button onClick={() => viewOrder(o.id)} className="p-1.5 rounded-md hover:bg-[var(--bg-input)] text-[var(--text-muted)] hover:text-[var(--text)]" title="Ver detalle">
@@ -518,16 +517,12 @@ export default function OrdersPage() {
                     <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
                   </button>
 
-                  {o.status === 'borrador' && (
-                    <>
-                      <button onClick={() => sendOrder(o.id)} className="p-1.5 rounded-md hover:bg-green-500/10 text-[var(--text-muted)] hover:text-green-400" title="Marcar como enviado">
-                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="22 2 11 13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg>
-                      </button>
-                      <button onClick={() => deleteOrder(o.id)} className="p-1.5 rounded-md hover:bg-red-500/10 text-[var(--text-muted)] hover:text-red-400" title="Eliminar">
-                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>
-                      </button>
-                    </>
+                  {(o.created_by === profile?.id || profile?.role === 'admin') && (
+                    <button onClick={() => deleteOrder(o.id)} className="p-1.5 rounded-md hover:bg-red-500/10 text-[var(--text-muted)] hover:text-red-400" title="Eliminar">
+                      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>
+                    </button>
                   )}
+
                   {profile?.role === 'admin' && o.status === 'enviado' && (
                     <button onClick={() => approveOrder(o.id)} className="p-1.5 rounded-md hover:bg-blue-500/10 text-[var(--text-muted)] hover:text-blue-400" title="Aprobar pedido">
                       <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="20 6 9 17 4 12"/></svg>
@@ -821,12 +816,6 @@ export default function OrdersPage() {
                     <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
                     {exportingId === detailOrder.id ? 'Generando…' : 'Exportar Excel'}
                   </button>
-                  {detailOrder.status === 'borrador' && (
-                    <button onClick={() => sendOrder(detailOrder.id)} className="btn-secondary py-2.5 text-sm px-6 flex items-center justify-center gap-2">
-                      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="22 2 11 13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg>
-                      Enviar
-                    </button>
-                  )}
                   {profile?.role === 'admin' && detailOrder.status === 'enviado' && (
                     <button onClick={() => approveOrder(detailOrder.id)} className="py-2.5 px-6 rounded-lg font-medium text-sm text-blue-400 bg-blue-500/10 hover:bg-blue-500/20 transition-colors flex items-center justify-center gap-2">
                       <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="20 6 9 17 4 12"/></svg>

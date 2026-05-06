@@ -88,7 +88,7 @@ function ProductAutocomplete({
         placeholder="Nombre"
       />
       {isOpen && filtered.length > 0 && (
-        <ul className="absolute z-[60] w-full mt-1 max-h-48 overflow-auto bg-[var(--bg-card)] border border-[var(--border)] rounded-lg shadow-xl">
+        <ul className="absolute z-[999] w-full mt-1 max-h-52 overflow-auto bg-[var(--bg-card)] border border-[var(--border)] rounded-lg shadow-2xl" style={{ position: 'fixed', width: wrapperRef.current?.getBoundingClientRect().width, left: wrapperRef.current?.getBoundingClientRect().left, top: (wrapperRef.current?.getBoundingClientRect().bottom ?? 0) + 4 }}>
           {filtered.map((p, i) => (
             <li
               key={i}
@@ -531,7 +531,7 @@ export default function OrdersPage() {
       {showCreate && (
         <div className="fixed inset-0 z-50 flex items-start justify-center pt-8 overflow-y-auto">
             <div className="absolute inset-0 bg-black/50 backdrop-blur-sm" onClick={resetForm} />
-            <div className="relative bg-[var(--bg-card)] border border-[var(--border)] rounded-xl shadow-2xl w-full max-w-2xl mx-4 mb-8 overflow-hidden">
+            <div className="relative bg-[var(--bg-card)] border border-[var(--border)] rounded-xl shadow-2xl w-full max-w-2xl mx-4 mb-8">
               {/* Header */}
               <div className="flex items-center justify-between px-6 py-4 border-b border-[var(--border)]">
                 <h2 className="text-lg font-semibold">Nuevo pedido</h2>
@@ -541,14 +541,20 @@ export default function OrdersPage() {
               </div>
 
               <form onSubmit={handleCreate} className="p-6 space-y-5">
-                {/* Area */}
-                <div>
-                  <label className="block text-xs font-medium text-[var(--text-muted)] uppercase tracking-wider mb-1.5">Área</label>
-                  <select value={orderArea} onChange={e => setOrderArea(e.target.value)} className="input-field text-sm" required>
-                    <option value="">Seleccionar área...</option>
-                    {areas.map(a => <option key={a.id} value={a.id}>{a.name}</option>)}
-                  </select>
-                </div>
+                {/* Area — solo visible para admin */}
+                {profile?.role === 'admin' ? (
+                  <div>
+                    <label className="block text-xs font-medium text-[var(--text-muted)] uppercase tracking-wider mb-1.5">Área destino</label>
+                    <select value={orderArea} onChange={e => setOrderArea(e.target.value)} className="input-field text-sm" required>
+                      <option value="">Seleccionar área...</option>
+                      {areas.map(a => <option key={a.id} value={a.id}>{a.name}</option>)}
+                    </select>
+                  </div>
+                ) : (
+                  <div className="text-sm text-[var(--text-muted)] bg-[var(--bg)] px-4 py-2.5 rounded-lg border border-[var(--border)]">
+                    Área: <span className="font-medium text-[var(--text)]">{areas.find(a => a.id === profile?.area_id)?.name || '—'}</span>
+                  </div>
+                )}
 
                 {/* Sede */}
                 {sedes.length > 0 && (
@@ -564,7 +570,7 @@ export default function OrdersPage() {
                 {/* ── BLOCKS ── */}
                 <div className="space-y-4">
                   {blocks.map((block, bIdx) => (
-                    <div key={bIdx} className="border border-[var(--border)] rounded-xl overflow-hidden">
+                    <div key={bIdx} className="border border-[var(--border)] rounded-xl">
                       {/* Block header */}
                       <div className="flex items-center gap-2 px-4 py-3 bg-[var(--bg)] border-b border-[var(--border)]">
                         {customCats[bIdx] ? (
@@ -626,6 +632,10 @@ export default function OrdersPage() {
                                     const items = [...copy[bIdx].items];
                                     items[iIdx] = { ...items[iIdx], product_name: p.name, unit: p.unit };
                                     copy[bIdx] = { ...copy[bIdx], items };
+                                    // Auto-fill category from catalog if block has no category set
+                                    if (!copy[bIdx].category && p.category) {
+                                      copy[bIdx] = { ...copy[bIdx], category: p.category };
+                                    }
                                     setBlocks(copy);
                                   }}
                                   catalog={catalog}

@@ -130,7 +130,8 @@ export default function PhysicalCountPage() {
     })));
     setShowForm(true);
     setFormError('');
-    setCountNotes('');\n  };
+    setCountNotes('');
+  };
 
   const handleSubmit = async () => {
     setFormLoading(true);

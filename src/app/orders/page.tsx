@@ -2,7 +2,8 @@
 
 import { useEffect, useState, useCallback, useRef, useMemo } from 'react';
 import { createClient } from '@/lib/supabase-client';
-import type { Profile, Area } from '@/lib/types';
+import type { Area } from '@/lib/types';
+import { useAuth } from '@/lib/AuthContext';
 import Navbar from '@/components/Navbar';
 import { useToastAndConfirm } from '@/components/ui/ToastAndConfirm';
 
@@ -28,11 +29,17 @@ interface Order {
   category: string | null;
   notes: string | null;
   created_at: string;
+  created_by: string;
   area: { name: string };
   sede: { name: string } | null;
   creator: { full_name: string };
   item_count: number;
   items?: { product_name: string; quantity: number; unit: string; notes: string | null; category?: string }[];
+}
+interface CatalogProduct {
+  name: string;
+  unit: string;
+  category: string;
 }
 
 const UNITS = ['unidades', 'kg', 'lb', 'litros', 'paquetes', 'cajas', 'botellas', 'gramos', 'onzas'];
@@ -42,11 +49,69 @@ function emptyItem(): OrderItem {
   return { product_name: '', quantity: '', unit: 'unidades', notes: '' };
 }
 
+function ProductAutocomplete({
+  value,
+  onChange,
+  onSelect,
+  catalog
+}: {
+  value: string;
+  onChange: (v: string) => void;
+  onSelect: (product: CatalogProduct) => void;
+  catalog: CatalogProduct[];
+}) {
+  const [isOpen, setIsOpen] = useState(false);
+  const wrapperRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    const handleClickOutside = (e: MouseEvent) => {
+      if (wrapperRef.current && !wrapperRef.current.contains(e.target as Node)) setIsOpen(false);
+    };
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, []);
+
+  const filtered = useMemo(() => {
+    const q = value.toLowerCase();
+    if (!q) return [];
+    return catalog.filter(c => c.name.toLowerCase().includes(q)).slice(0, 30);
+  }, [value, catalog]);
+
+  return (
+    <div className="relative" ref={wrapperRef}>
+      <input
+        type="text"
+        value={value}
+        onChange={e => { onChange(e.target.value); setIsOpen(true); }}
+        onFocus={() => { if (value) setIsOpen(true); }}
+        className="input-field text-sm w-full"
+        placeholder="Nombre"
+      />
+      {isOpen && filtered.length > 0 && (
+        <ul className="absolute z-[60] w-full mt-1 max-h-48 overflow-auto bg-[var(--bg-card)] border border-[var(--border)] rounded-lg shadow-xl">
+          {filtered.map((p, i) => (
+            <li
+              key={i}
+              className="px-3 py-2 text-sm hover:bg-[var(--bg-input)] cursor-pointer border-b border-[var(--border)]/50 last:border-0"
+              onClick={() => {
+                onSelect(p);
+                setIsOpen(false);
+              }}
+            >
+              <div className="font-medium truncate text-[var(--text)]">{p.name}</div>
+              <div className="text-[11px] text-[var(--text-muted)] truncate">{p.category} · {p.unit}</div>
+            </li>
+          ))}
+        </ul>
+      )}
+    </div>
+  );
+}
+
 export default function OrdersPage() {
   const supabase = useMemo(() => createClient(), []);
   const { askConfirm, showToast } = useToastAndConfirm();
-  const [profile, setProfile] = useState<Profile | null>(null);
-  const [areas, setAreas] = useState<Area[]>([]);
+  const { profile, areas, sedes, loading: authLoading } = useAuth();
   const [orders, setOrders] = useState<Order[]>([]);
   const [loading, setLoading] = useState(true);
 
@@ -54,7 +119,6 @@ export default function OrdersPage() {
   const [showCreate, setShowCreate] = useState(false);
   const [orderArea, setOrderArea] = useState('');
   const [orderSede, setOrderSede] = useState('');
-  const [sedes, setSedes] = useState<Sede[]>([]);
   const [orderNotes, setOrderNotes] = useState('');
   const [blocks, setBlocks] = useState<OrderBlock[]>([
     { category: '', items: [emptyItem()] },
@@ -62,6 +126,7 @@ export default function OrdersPage() {
   const [customCats, setCustomCats] = useState<Record<number, boolean>>({});
   const [formLoading, setFormLoading] = useState(false);
   const [formError, setFormError] = useState('');
+  const [catalog, setCatalog] = useState<CatalogProduct[]>([]);
 
   // Detail view
   const [detailOrder, setDetailOrder] = useState<Order | null>(null);
@@ -116,28 +181,31 @@ export default function OrdersPage() {
     }));
   }, [supabase]);
 
+  const loadCatalog = useCallback(async () => {
+    const { data } = await supabase.from('products').select('name, unit, category');
+    if (data) {
+      const map = new Map<string, CatalogProduct>();
+      for (const p of data) {
+        const k = p.name.toLowerCase();
+        if (!map.has(k)) map.set(k, { name: p.name, unit: p.unit, category: p.category || 'General' });
+      }
+      setCatalog(Array.from(map.values()).sort((a, b) => a.name.localeCompare(b.name)));
+    }
+  }, [supabase]);
+
   useEffect(() => {
-    const init = async () => {
-      const { data: { user } } = await supabase.auth.getUser();
-      if (!user) return;
-      const { data: prof } = await supabase.from('profiles').select('*').eq('id', user.id).single();
-      setProfile(prof);
+    if (showCreate && catalog.length === 0) loadCatalog();
+  }, [showCreate, catalog.length, loadCatalog]);
 
-      const { data: areasData } = await supabase.from('areas').select('*');
-      setAreas(areasData || []);
-      const { data: sedesData } = await supabase.from('sedes').select('*');
-      setSedes(sedesData || []);
-
-      if (prof?.area_id) setOrderArea(prof.area_id);
-
-      await loadOrders();
-      setLoading(false);
-    };
-    init();
-  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => {
+    if (!authLoading && profile) {
+      if (profile.area_id) setOrderArea(profile.area_id);
+      loadOrders().then(() => setLoading(false));
+    }
+  }, [authLoading]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const filteredOrders = profile?.role === 'admin'
-    ? orders.filter(o => o.status !== 'borrador')
+    ? orders.filter(o => o.status !== 'borrador' || o.created_by === profile?.id)
     : orders.filter(o => o.area_id === profile?.area_id);
 
   // ── Block helpers ──
@@ -219,6 +287,16 @@ export default function OrdersPage() {
 
     if (allItems.length === 0) { setFormError('Agrega al menos un producto'); setFormLoading(false); return; }
 
+    // Validate that all products exist in catalog
+    const invalidItems = allItems.filter(item => 
+      !catalog.some(c => c.name.toLowerCase() === item.product_name.toLowerCase())
+    );
+    if (invalidItems.length > 0) {
+      setFormError(`Por favor selecciona productos existentes del catálogo. Inválidos: ${invalidItems.map(i => i.product_name).join(', ')}`);
+      setFormLoading(false);
+      return;
+    }
+
     // Get unique categories for the order-level label
     const cats = [...new Set(allItems.map(i => i.category))];
     const categoryLabel = cats.join(', ');
@@ -236,13 +314,19 @@ export default function OrdersPage() {
 
     resetForm();
     setFormLoading(false);
-    loadOrders();
+    showToast('Pedido creado exitosamente', 'success');
+    await loadOrders();
   };
 
   // ── Send order ──
   const sendOrder = async (id: string) => {
-    await supabase.from('orders').update({ status: 'enviado' }).eq('id', id);
-    loadOrders();
+    const { error } = await supabase.from('orders').update({ status: 'enviado' }).eq('id', id);
+    if (error) {
+      showToast('Error al enviar el pedido', 'error');
+      return;
+    }
+    showToast('Pedido enviado correctamente', 'success');
+    await loadOrders();
     if (detailOrder?.id === id) {
       const { data } = await supabase.from('orders').select('*').eq('id', id).single();
       if (data) setDetailOrder(await enrichOrder(data));
@@ -253,8 +337,13 @@ export default function OrdersPage() {
   const deleteOrder = async (id: string) => {
     const isConfirmed = await askConfirm('¿Eliminar este pedido?');
     if (!isConfirmed) return;
-    await supabase.from('orders').delete().eq('id', id);
-    loadOrders();
+    const { error } = await supabase.from('orders').delete().eq('id', id);
+    if (error) {
+      showToast('Error al eliminar', 'error');
+      return;
+    }
+    showToast('Pedido eliminado', 'success');
+    await loadOrders();
     if (detailOrder?.id === id) setDetailOrder(null);
   };
 
@@ -268,7 +357,7 @@ export default function OrdersPage() {
       return;
     }
     showToast('Pedido aprobado correctamente', 'success');
-    loadOrders();
+    await loadOrders();
     if (detailOrder?.id === id) {
       const { data } = await supabase.from('orders').select('*').eq('id', id).single();
       if (data) setDetailOrder(await enrichOrder(data));
@@ -333,14 +422,17 @@ export default function OrdersPage() {
     return groups;
   };
 
-  if (loading) {
+  if (loading || authLoading) {
     return (
       <>
         <Navbar />
-        <div className="max-w-5xl mx-auto p-6">
-          <div className="animate-pulse space-y-4">
-            <div className="h-8 bg-[var(--bg-input)] rounded w-48" />
-            <div className="h-16 bg-[var(--bg-input)] rounded" />
+        <div className="max-w-5xl mx-auto p-4 sm:p-6 animate-fade-in">
+          <div className="flex items-center justify-between mb-6">
+            <div className="skeleton h-8 w-32" />
+            <div className="skeleton h-9 w-32 rounded-lg" />
+          </div>
+          <div className="space-y-2">
+            {[...Array(4)].map((_, i) => <div key={i} className="skeleton h-16 w-full rounded-lg" />)}
           </div>
         </div>
       </>
@@ -391,7 +483,7 @@ export default function OrdersPage() {
                       {o.sede && <span className="text-xs text-[var(--text-muted)] ml-1">({o.sede.name})</span>}
                       <span className="ml-2 text-xs text-[var(--text-muted)]">({Array.isArray(o.items) ? o.items.length : 0} productos)</span>
                     </p>
-                    <p className="text-xs text-[var(--text-muted)]">
+                    <p suppressHydrationWarning className="text-xs text-[var(--text-muted)]">
                       {o.creator?.full_name || '—'} · {new Date(o.created_at).toLocaleDateString('es-CO', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' })}
                     </p>
                   </div>
@@ -523,13 +615,17 @@ export default function OrdersPage() {
                             <div className="grid grid-cols-[1fr_70px_90px_28px] gap-2 items-end">
                               <div>
                                 {iIdx === 0 && <label className="block text-xs text-[var(--text-muted)] mb-1">Producto</label>}
-                                <input
-                                  ref={bIdx === blocks.length - 1 && iIdx === block.items.length - 1 ? lastItemRef : undefined}
-                                  type="text"
+                                <ProductAutocomplete
                                   value={item.product_name}
-                                  onChange={e => updateItemInBlock(bIdx, iIdx, 'product_name', e.target.value)}
-                                  className="input-field text-sm"
-                                  placeholder="Nombre"
+                                  onChange={v => updateItemInBlock(bIdx, iIdx, 'product_name', v)}
+                                  onSelect={p => {
+                                    const copy = [...blocks];
+                                    const items = [...copy[bIdx].items];
+                                    items[iIdx] = { ...items[iIdx], product_name: p.name, unit: p.unit };
+                                    copy[bIdx] = { ...copy[bIdx], items };
+                                    setBlocks(copy);
+                                  }}
+                                  catalog={catalog}
                                 />
                               </div>
                               <div>
@@ -627,7 +723,7 @@ export default function OrdersPage() {
                   <h2 className="text-lg font-semibold">
                     Pedido — {detailOrder.area?.name || '—'}
                   </h2>
-                  <p className="text-xs text-[var(--text-muted)]">
+                  <p suppressHydrationWarning className="text-xs text-[var(--text-muted)]">
                     {detailOrder.creator?.full_name || '—'} · {new Date(detailOrder.created_at).toLocaleDateString('es-CO', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' })}
                   </p>
                 </div>

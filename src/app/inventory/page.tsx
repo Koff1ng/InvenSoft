@@ -2,12 +2,12 @@
 
 import { useEffect, useState, useCallback, useMemo } from 'react';
 import { createClient } from '@/lib/supabase-client';
-import type { Profile, InventoryItem, Area } from '@/lib/types';
+import type { InventoryItem } from '@/lib/types';
+import { useAuth } from '@/lib/AuthContext';
+import { useDebounce } from '@/lib/useDebounce';
 import Navbar from '@/components/Navbar';
 import Link from 'next/link';
 import { useToastAndConfirm } from '@/components/ui/ToastAndConfirm';
-
-interface Sede { id: string; name: string; }
 
 const PAGE_SIZE = 20;
 type SortField = 'name' | 'quantity' | 'updated_at';
@@ -16,9 +16,8 @@ type SortDir = 'asc' | 'desc';
 export default function InventoryPage() {
   const supabase = useMemo(() => createClient(), []);
   const { askConfirm, showToast } = useToastAndConfirm();
-  const [profile, setProfile] = useState<Profile | null>(null);
+  const { profile, areas, sedes, loading: authLoading } = useAuth();
   const [items, setItems] = useState<InventoryItem[]>([]);
-  const [areas, setAreas] = useState<Area[]>([]);
   const [loading, setLoading] = useState(true);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editQty, setEditQty] = useState('');
@@ -27,6 +26,7 @@ export default function InventoryPage() {
 
   // Filters
   const [search, setSearch] = useState('');
+  const debouncedSearch = useDebounce(search, 300);
   const [sortField, setSortField] = useState<SortField>('updated_at');
   const [sortDir, setSortDir] = useState<SortDir>('desc');
   const [page, setPage] = useState(0);
@@ -37,37 +37,18 @@ export default function InventoryPage() {
   const [dateFrom, setDateFrom] = useState('');
   const [dateTo, setDateTo] = useState('');
   const [filterSede, setFilterSede] = useState<string>('all');
-  const [sedes, setSedes] = useState<Sede[]>([]);
 
   // Categories from loaded items
   const [categories, setCategories] = useState<string[]>([]);
 
-  const loadProfile = useCallback(async () => {
-    const { data: { user } } = await supabase.auth.getUser();
-    if (!user) return null;
-    const { data: prof } = await supabase
-      .from('profiles')
-      .select('*')
-      .eq('id', user.id)
-      .single();
-    setProfile(prof);
 
-    if (prof?.role === 'admin') {
-      const { data: areasData } = await supabase.from('areas').select('*');
-      setAreas(areasData || []);
-      const { data: sedesData } = await supabase.from('sedes').select('*');
-      setSedes(sedesData || []);
-    }
 
-    return prof;
-  }, [supabase]);
-
-  const loadData = useCallback(async (prof?: Profile | null) => {
-    const p = prof ?? profile;
+  const loadData = useCallback(async () => {
+    const p = profile;
     if (!p) return;
 
     // Use !inner join when searching or filtering category to prevent null product relations
-    const needsInner = !!search.trim() || filterCategory !== 'all';
+    const needsInner = !!debouncedSearch.trim() || filterCategory !== 'all';
     const productJoin = needsInner ? 'product:products!inner(*)' : 'product:products(*)';
 
     let query = supabase
@@ -92,7 +73,7 @@ export default function InventoryPage() {
     }
 
 
-    if (search.trim()) query = query.ilike('product.name', `%${search.trim()}%`);
+    if (debouncedSearch.trim()) query = query.ilike('product.name', `%${debouncedSearch.trim()}%`);
     if (dateFrom) query = query.gte('updated_at', new Date(dateFrom).toISOString());
     if (dateTo) {
       const to = new Date(dateTo);
@@ -123,19 +104,15 @@ export default function InventoryPage() {
     setCategories(Array.from(cats).sort());
 
     setLoading(false);
-  }, [supabase, profile, search, sortField, sortDir, page, filterArea, filterSede, filterCategory, dateFrom, dateTo]);
+  }, [supabase, profile, debouncedSearch, sortField, sortDir, page, filterArea, filterSede, filterCategory, dateFrom, dateTo]);
 
   useEffect(() => {
-    const init = async () => {
-      const prof = await loadProfile();
-      if (prof) await loadData(prof);
-    };
-    init();
-  }, []);
+    if (!authLoading && profile) loadData();
+  }, [authLoading]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
     if (profile) loadData();
-  }, [search, sortField, sortDir, page, filterArea, filterSede, filterCategory, dateFrom, dateTo]);
+  }, [debouncedSearch, sortField, sortDir, page, filterArea, filterSede, filterCategory, dateFrom, dateTo]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Realtime
   useEffect(() => {
@@ -312,12 +289,29 @@ export default function InventoryPage() {
 
   const totalPages = Math.ceil(totalCount / PAGE_SIZE);
 
-  if (loading) {
+  if (loading || authLoading) {
     return (
       <>
         <Navbar />
-        <div className="max-w-6xl mx-auto p-4">
-          <p className="text-[var(--text-muted)]">Cargando...</p>
+        <div className="max-w-6xl mx-auto p-4 animate-fade-in">
+          <div className="flex items-center justify-between mb-6">
+            <div>
+              <div className="skeleton h-7 w-32 mb-1" />
+              <div className="skeleton h-4 w-24" />
+            </div>
+            <div className="flex gap-2">
+              <div className="skeleton h-9 w-28 rounded-lg" />
+              <div className="skeleton h-9 w-24 rounded-lg" />
+              <div className="skeleton h-9 w-32 rounded-lg" />
+            </div>
+          </div>
+          <div className="flex gap-2 mb-4">
+            <div className="skeleton h-9 w-52 rounded-lg" />
+            <div className="skeleton h-9 w-32 rounded-lg" />
+          </div>
+          <div className="space-y-2">
+            {[...Array(6)].map((_, i) => <div key={i} className="skeleton h-14 w-full rounded-lg" />)}
+          </div>
         </div>
       </>
     );
@@ -332,7 +326,7 @@ export default function InventoryPage() {
       <Navbar />
       <div className="max-w-6xl mx-auto p-4 animate-fade-in">
         {/* Header */}
-        <div className="flex items-center justify-between mb-6 stagger-1">
+        <div className="flex items-center justify-between mb-6">
           <div>
             <h1 className="text-xl font-semibold">Inventario</h1>
             <p className="text-[var(--text-muted)] text-xs mt-0.5">{areaName}</p>

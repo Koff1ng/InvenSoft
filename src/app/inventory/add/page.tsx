@@ -1,18 +1,15 @@
 'use client';
 
-import { useEffect, useState, useMemo } from 'react';
+import { useState, useMemo } from 'react';
 import { createClient } from '@/lib/supabase-client';
 import { useRouter } from 'next/navigation';
-import type { Profile, Area } from '@/lib/types';
+import { useAuth } from '@/lib/AuthContext';
 import Navbar from '@/components/Navbar';
-
-interface Sede { id: string; name: string; }
 
 export default function AddProductPage() {
   const supabase = useMemo(() => createClient(), []);
   const router = useRouter();
-  const [profile, setProfile] = useState<Profile | null>(null);
-  const [areas, setAreas] = useState<Area[]>([]);
+  const { profile, areas, sedes } = useAuth();
   const [name, setName] = useState('');
   const [unit, setUnit] = useState('unidades');
   const [quantity, setQuantity] = useState('0');
@@ -20,31 +17,9 @@ export default function AddProductPage() {
   const [notes, setNotes] = useState('');
   const [selectedAreaId, setSelectedAreaId] = useState('');
   const [selectedSedeId, setSelectedSedeId] = useState('');
-  const [sedes, setSedes] = useState<Sede[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
 
-  useEffect(() => {
-    const load = async () => {
-      const { data: { user } } = await supabase.auth.getUser();
-      if (!user) return;
-
-      const { data: prof } = await supabase
-        .from('profiles')
-        .select('*')
-        .eq('id', user.id)
-        .single();
-      setProfile(prof);
-
-      if (prof?.role === 'admin') {
-        const { data } = await supabase.from('areas').select('*');
-        setAreas(data || []);
-        const { data: s } = await supabase.from('sedes').select('*');
-        setSedes(s || []);
-      }
-    };
-    load();
-  }, [supabase]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();

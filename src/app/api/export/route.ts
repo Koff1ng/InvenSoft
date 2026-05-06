@@ -42,11 +42,14 @@ export async function GET(request: Request) {
   }
 
   const url = new URL(request.url);
+  const filterArea = url.searchParams.get('area');
+  const filterCategory = url.searchParams.get('category');
+  const filterSearch = url.searchParams.get('search')?.toLowerCase();
   const sedeId = url.searchParams.get('sede') || undefined;
 
   let query = supabase
     .from('inventory_items')
-    .select('quantity, updated_at, product:products(name, unit, category, notes), area:areas(name), sede:sedes(name)');
+    .select('area_id, quantity, updated_at, product:products(name, unit, category, notes), area:areas(name), sede:sedes(name)');
 
   if (sedeId) query = query.eq('sede_id', sedeId);
 
@@ -58,9 +61,10 @@ export async function GET(request: Request) {
     return NextResponse.json({ error: 'No hay datos para exportar' }, { status: 404 });
   }
 
-  const items = itemsRaw as unknown as InventoryItemRow[];
+  const items = itemsRaw as unknown as (InventoryItemRow & { area_id: string })[];
 
-  const flatItems = items.map((i) => ({
+  let flatItems = items.map((i) => ({
+    area_id: i.area_id,
     area_name: i.area?.name || '',
     product_name: i.product?.name || '',
     quantity: i.quantity,
@@ -70,6 +74,14 @@ export async function GET(request: Request) {
     sede_name: i.sede?.name || '',
     updated_at: i.updated_at,
   }));
+
+  if (filterArea) flatItems = flatItems.filter(i => i.area_id === filterArea);
+  if (filterCategory) flatItems = flatItems.filter(i => i.product_category === filterCategory);
+  if (filterSearch) flatItems = flatItems.filter(i => i.product_name.toLowerCase().includes(filterSearch));
+
+  if (flatItems.length === 0) {
+    return NextResponse.json({ error: 'No hay datos para exportar con estos filtros' }, { status: 404 });
+  }
 
   const wb = new ExcelJS.Workbook();
   wb.creator = 'La Comitiva - Sistema de Inventarios';
@@ -98,9 +110,11 @@ export async function GET(request: Request) {
 
   ws.mergeCells('A1:F1');
   const title = ws.getCell('A1');
-  const sedeName = sedeId && flatItems[0]?.sede_name ? flatItems[0].sede_name : 'Todas las Sedes';
-  title.value = `La Comitiva — ${sedeName}`;
-  title.font = { name: 'Calibri', size: 18, bold: true, color: { argb: COLORS.headerFont } };
+  let titleText = 'La Comitiva — Inventario Consolidado';
+  if (filterArea) titleText = `La Comitiva — Área: ${flatItems[0]?.area_name || filterArea}`;
+  if (filterCategory) titleText += ` | Cat: ${filterCategory}`;
+  title.value = titleText;
+  title.font = { name: 'Calibri', size: 16, bold: true, color: { argb: COLORS.headerFont } };
   title.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: COLORS.primary } };
   title.alignment = { horizontal: 'center', vertical: 'middle' };
   ws.getRow(1).height = 42;

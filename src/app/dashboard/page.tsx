@@ -2,7 +2,8 @@
 
 import { useEffect, useState, useCallback, useMemo } from 'react';
 import { createClient } from '@/lib/supabase-client';
-import type { Profile, InventoryItem, Area } from '@/lib/types';
+import type { InventoryItem } from '@/lib/types';
+import { useAuth } from '@/lib/AuthContext';
 import Navbar from '@/components/Navbar';
 import { useToastAndConfirm } from '@/components/ui/ToastAndConfirm';
 import { useRouter } from 'next/navigation';
@@ -38,11 +39,11 @@ export default function DashboardPage() {
   const supabase = useMemo(() => createClient(), []);
   const router = useRouter();
   const { showToast } = useToastAndConfirm();
-  const [profile, setProfile] = useState<Profile | null>(null);
+  const { profile, areas, loading: authLoading } = useAuth();
   const [allItems, setAllItems] = useState<InventoryItem[]>([]);
-  const [areas, setAreas] = useState<Area[]>([]);
   const [activity, setActivity] = useState<ActivityItem[]>([]);
   const [filterArea, setFilterArea] = useState<string>('all');
+  const [filterCategory, setFilterCategory] = useState<string>('all');
   const [loading, setLoading] = useState(true);
 
   const [search, setSearch] = useState('');
@@ -55,20 +56,8 @@ export default function DashboardPage() {
   const [pendingCounts, setPendingCounts] = useState(0);
 
   const loadData = useCallback(async () => {
-    const { data: { user } } = await supabase.auth.getUser();
-    if (!user) return;
-
-    const { data: prof } = await supabase
-      .from('profiles')
-      .select('*')
-      .eq('id', user.id)
-      .single();
-
-    if (prof?.role !== 'admin') { router.push('/inventory'); return; }
-    setProfile(prof);
-
-    const { data: areasData } = await supabase.from('areas').select('*');
-    setAreas(areasData || []);
+    if (!profile) return;
+    if (profile.role !== 'admin') { router.push('/inventory'); return; }
 
     const { data: itemsData } = await supabase
       .from('inventory_items')
@@ -130,9 +119,9 @@ export default function DashboardPage() {
       .select('id, category, status, created_at, created_by, area_id, items')
       .order('created_at', { ascending: false });
 
-    if (prof.role !== 'admin' && prof.area_id) {
-      ordersQuery = ordersQuery.eq('area_id', prof.area_id);
-    } else if (prof.role === 'admin') {
+    if (profile.role !== 'admin' && profile.area_id) {
+      ordersQuery = ordersQuery.eq('area_id', profile.area_id);
+    } else if (profile.role === 'admin') {
       ordersQuery = ordersQuery.neq('status', 'borrador');
     }
 
@@ -215,7 +204,9 @@ export default function DashboardPage() {
     setLoading(false);
   }, [supabase, router]);
 
-  useEffect(() => { loadData(); }, []); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => {
+    if (!authLoading && profile) loadData();
+  }, [authLoading]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Realtime
   useEffect(() => {
@@ -235,7 +226,12 @@ export default function DashboardPage() {
     if (exporting) return;
     setExporting(true);
     try {
-      const res = await fetch('/api/export', { cache: 'no-store' });
+      const queryParams = new URLSearchParams();
+      if (filterArea !== 'all') queryParams.set('area', filterArea);
+      if (filterCategory !== 'all') queryParams.set('category', filterCategory);
+      if (search.trim()) queryParams.set('search', search.trim());
+
+      const res = await fetch(`/api/export?${queryParams.toString()}`, { cache: 'no-store' });
       const contentType = res.headers.get('content-type') || '';
 
       if (!res.ok || !contentType.includes('spreadsheetml')) {
@@ -270,10 +266,15 @@ export default function DashboardPage() {
   // Filters
   let filtered = allItems;
   if (filterArea !== 'all') filtered = filtered.filter(i => i.area_id === filterArea);
+  if (filterCategory !== 'all') filtered = filtered.filter(i => i.product?.category === filterCategory);
   if (search.trim()) {
     const q = search.toLowerCase();
     filtered = filtered.filter(i => i.product?.name?.toLowerCase().includes(q));
   }
+
+  // Categories
+  const categories = Array.from(new Set(allItems.map(i => i.product?.category).filter(Boolean))) as string[];
+  categories.sort();
 
   // Sort
   filtered = [...filtered].sort((a, b) => {
@@ -335,15 +336,35 @@ export default function DashboardPage() {
     }
   };
 
-  if (loading) {
-    return (<><Navbar /><div className="max-w-6xl mx-auto p-4"><p className="text-[var(--text-muted)]">Cargando...</p></div></>);
+  if (loading || authLoading) {
+    return (
+      <>
+        <Navbar />
+        <div className="max-w-6xl mx-auto p-4 animate-fade-in">
+          <div className="flex items-center justify-between mb-6">
+            <div>
+              <div className="skeleton h-8 w-56 mb-1" />
+              <div className="skeleton h-4 w-40" />
+            </div>
+            <div className="skeleton h-9 w-32 rounded-lg" />
+          </div>
+          <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3 mb-6">
+            {[...Array(6)].map((_, i) => <div key={i} className="skeleton h-20 rounded-xl" />)}
+          </div>
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+            <div className="skeleton h-48 rounded-xl" />
+            <div className="skeleton h-48 rounded-xl" />
+          </div>
+        </div>
+      </>
+    );
   }
 
   return (
     <>
       <Navbar />
       <div className="max-w-6xl mx-auto p-4 animate-fade-in">
-        <div className="flex items-center justify-between mb-6 flex-wrap gap-2 stagger-1">
+        <div className="flex items-center justify-between mb-6 flex-wrap gap-2">
           <div>
             <h1 className="text-2xl font-bold">Dashboard Administrativo</h1>
             <p className="text-[var(--text-muted)] text-sm">Vista unificada del inventario</p>
@@ -457,6 +478,11 @@ export default function DashboardPage() {
             className="input-field w-auto text-xs">
             <option value="all">Todas las áreas</option>
             {areas.map(a => <option key={a.id} value={a.id}>{a.name}</option>)}
+          </select>
+          <select value={filterCategory} onChange={(e) => { setFilterCategory(e.target.value); setPage(0); }}
+            className="input-field w-auto text-xs">
+            <option value="all">Todas las categorías</option>
+            {categories.map(c => <option key={c} value={c}>{c}</option>)}
           </select>
           <span className="text-xs text-[var(--text-muted)] ml-auto">
             {filtered.length} resultado{filtered.length !== 1 ? 's' : ''}

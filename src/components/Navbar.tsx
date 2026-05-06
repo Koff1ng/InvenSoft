@@ -1,44 +1,60 @@
 'use client';
 
-import { createClient } from '@/lib/supabase-client';
 import { useRouter, usePathname } from 'next/navigation';
 import Link from 'next/link';
 import Image from 'next/image';
-import type { Profile } from '@/lib/types';
-import { useEffect, useState, useMemo } from 'react';
+import { useState, useCallback, useEffect, useRef } from 'react';
+import { useAuth, clearAuthCache } from '@/lib/AuthContext';
+import { createClient } from '@/lib/supabase-client';
 
 export default function Navbar() {
-  const supabase = useMemo(() => createClient(), []);
+  const { profile } = useAuth();
   const router = useRouter();
   const pathname = usePathname();
-  const [profile, setProfile] = useState<Profile | null>(null);
   const [menuOpen, setMenuOpen] = useState(false);
-  // Derived-state pattern: close the mobile menu whenever the URL changes,
-  // without firing a side-effect inside useEffect (which Next 16 marks as
-  // an error: react-hooks/set-state-in-effect).
+  const [menuClosing, setMenuClosing] = useState(false);
+  const menuRef = useRef<HTMLDivElement>(null);
+
+  // Close mobile menu on route change
   const [lastPathname, setLastPathname] = useState(pathname);
   if (lastPathname !== pathname) {
     setLastPathname(pathname);
-    if (menuOpen) setMenuOpen(false);
+    if (menuOpen) {
+      setMenuOpen(false);
+      setMenuClosing(false);
+    }
   }
 
-  useEffect(() => {
-    let cancelled = false;
-    const loadProfile = async () => {
-      const { data: { user } } = await supabase.auth.getUser();
-      if (cancelled || !user) return;
-      const { data } = await supabase.from('profiles').select('*').eq('id', user.id).single();
-      if (!cancelled) setProfile(data);
-    };
-    loadProfile();
-    return () => { cancelled = true; };
-  }, [supabase]);
-
-  const handleLogout = async () => {
+  const handleLogout = useCallback(async () => {
+    const supabase = createClient();
+    clearAuthCache();
     await supabase.auth.signOut();
     router.push('/login');
     router.refresh();
-  };
+  }, [router]);
+
+  const closeMenu = useCallback(() => {
+    setMenuClosing(true);
+    setTimeout(() => {
+      setMenuOpen(false);
+      setMenuClosing(false);
+    }, 200);
+  }, []);
+
+  const openMenu = useCallback(() => {
+    setMenuClosing(false);
+    setMenuOpen(true);
+  }, []);
+
+  // Lock body scroll when menu is open
+  useEffect(() => {
+    if (menuOpen) {
+      document.body.style.overflow = 'hidden';
+    } else {
+      document.body.style.overflow = '';
+    }
+    return () => { document.body.style.overflow = ''; };
+  }, [menuOpen]);
 
   const roleLabels: Record<string, string> = {
     admin: 'Admin',
@@ -68,7 +84,7 @@ export default function Navbar() {
         <div className="max-w-6xl mx-auto flex items-center justify-between gap-4">
           <div className="flex items-center gap-6">
             <Link href="/" className="flex items-center gap-2.5 shrink-0">
-              <Image src="/logo_white.svg" alt="La Comitiva" width={64} height={64} style={{ height: 'auto' }} className="rounded" />
+              <Image src="/logo_white.svg" alt="La Comitiva" width={64} height={64} style={{ height: 'auto' }} className="rounded" priority />
             </Link>
 
             {/* Desktop links */}
@@ -104,11 +120,11 @@ export default function Navbar() {
 
             {/* Mobile hamburger */}
             <button
-              onClick={() => setMenuOpen(!menuOpen)}
+              onClick={menuOpen ? closeMenu : openMenu}
               className="md:hidden p-1.5 rounded-lg hover:bg-[var(--bg-hover)] text-[var(--text-muted)]"
               aria-label="Menú"
             >
-              {menuOpen ? (
+              {menuOpen && !menuClosing ? (
                 <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
               ) : (
                 <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="21" y2="18"/></svg>
@@ -118,12 +134,15 @@ export default function Navbar() {
         </div>
       </nav>
 
-      {/* Mobile menu overlay */}
+      {/* Mobile menu overlay — animated */}
       {menuOpen && (
-        <div className="md:hidden fixed inset-0 z-50" onClick={() => setMenuOpen(false)}>
-          <div className="absolute inset-0 bg-black/40 backdrop-blur-sm" />
-          <div className="absolute top-0 right-0 w-64 h-full bg-[var(--bg-card)] border-l border-[var(--border)] shadow-2xl"
-            onClick={e => e.stopPropagation()}>
+        <div className="md:hidden fixed inset-0 z-50" onClick={closeMenu}>
+          <div className={`absolute inset-0 bg-black/40 backdrop-blur-sm ${menuClosing ? 'opacity-0 transition-opacity duration-200' : 'mobile-menu-overlay'}`} />
+          <div
+            ref={menuRef}
+            className={`absolute top-0 right-0 w-64 h-full bg-[var(--bg-card)] border-l border-[var(--border)] shadow-2xl ${menuClosing ? 'mobile-menu-panel-exit' : 'mobile-menu-panel'}`}
+            onClick={e => e.stopPropagation()}
+          >
             <div className="flex items-center justify-between p-4 border-b border-[var(--border)]">
               <div className="flex items-center gap-2">
                 <Image src="/logo_white.svg" alt="La Comitiva" width={48} height={48} style={{ height: 'auto' }} className="rounded" />
@@ -133,7 +152,7 @@ export default function Navbar() {
                   </span>
                 )}
               </div>
-              <button onClick={() => setMenuOpen(false)} className="p-1 rounded-md hover:bg-[var(--bg-input)] text-[var(--text-muted)]">
+              <button onClick={closeMenu} className="p-1 rounded-md hover:bg-[var(--bg-input)] text-[var(--text-muted)]">
                 <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
               </button>
             </div>

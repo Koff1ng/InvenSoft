@@ -2,6 +2,7 @@
 
 import { useEffect, useState, useMemo, useCallback } from 'react';
 import { createClient } from '@/lib/supabase-client';
+import { useAuth } from '@/lib/AuthContext';
 import Navbar from '@/components/Navbar';
 
 interface HistoryEntry {
@@ -36,6 +37,7 @@ const PAGE_SIZE = 25;
 
 export default function HistoryPage() {
   const supabase = useMemo(() => createClient(), []);
+  const { profile, loading: authLoading } = useAuth();
   const [entries, setEntries] = useState<HistoryEntry[]>([]);
   const [loading, setLoading] = useState(true);
   const [page, setPage] = useState(0);
@@ -44,16 +46,7 @@ export default function HistoryPage() {
   const [dateTo, setDateTo] = useState('');
 
   const loadData = useCallback(async () => {
-    const { data: { user } } = await supabase.auth.getUser();
-    if (!user) return;
-
-    const { data: prof } = await supabase
-      .from('profiles')
-      .select('role, area_id')
-      .eq('id', user.id)
-      .single();
-
-    if (!prof) return;
+    if (!profile) return;
 
     let query = supabase
       .from('inventory_updates')
@@ -63,8 +56,8 @@ export default function HistoryPage() {
       )
       .order('updated_at', { ascending: false });
 
-    if (prof.role !== 'admin' && prof.area_id) {
-      query = query.eq('inventory_items.area_id', prof.area_id);
+    if (profile.role !== 'admin' && profile.area_id) {
+      query = query.eq('inventory_items.area_id', profile.area_id);
     }
 
     if (dateFrom) query = query.gte('updated_at', new Date(dateFrom).toISOString());
@@ -133,24 +126,30 @@ export default function HistoryPage() {
     setEntries(enriched);
     setTotalCount(count || 0);
     setLoading(false);
-  }, [supabase, page, dateFrom, dateTo]);
+  }, [supabase, profile, page, dateFrom, dateTo]);
 
   useEffect(() => {
-    loadData();
-  }, [loadData]);
+    if (!authLoading && profile) loadData();
+  }, [authLoading, loadData]);
 
   const totalPages = Math.ceil(totalCount / PAGE_SIZE);
 
-  if (loading) {
+  if (authLoading) {
     return (
       <>
         <Navbar />
-        <div className="max-w-6xl mx-auto p-4">
-          <p className="text-[var(--text-muted)]">Cargando...</p>
+        <div className="max-w-6xl mx-auto p-4 animate-fade-in">
+          <div className="skeleton h-8 w-48 mb-2" />
+          <div className="skeleton h-4 w-32 mb-6" />
+          <div className="space-y-2">
+            {[...Array(6)].map((_, i) => <div key={i} className="skeleton h-12 w-full rounded-lg" />)}
+          </div>
         </div>
       </>
     );
   }
+
+
 
   return (
     <>

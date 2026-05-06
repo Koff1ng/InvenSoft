@@ -45,17 +45,37 @@ export async function GET(request: Request) {
   const sedeId = url.searchParams.get('sede') || undefined;
 
   // Fetch all inventory items with product, area, sede
-  let query = supabase
-    .from('inventory_items')
-    .select('area_id, quantity, updated_at, product:products(name, unit, category, notes), area:areas(id, name, parent_id), sede:sedes(name)');
+  // Fetch ALL items with pagination (Supabase default limit = 1000)
+  const PAGE_SIZE = 1000;
+  let allItems: any[] = [];
+  let page = 0;
+  let hasMore = true;
 
-  if (sedeId) query = query.eq('sede_id', sedeId);
+  while (hasMore) {
+    const from = page * PAGE_SIZE;
+    const to = from + PAGE_SIZE - 1;
+    let query = supabase
+      .from('inventory_items')
+      .select('area_id, quantity, updated_at, product:products(name, unit, category, notes), area:areas(id, name, parent_id), sede:sedes(name)')
+      .range(from, to);
 
-  const { data: itemsRaw, error: queryErr } = await query;
-  if (queryErr) {
-    return NextResponse.json({ error: 'Error: ' + queryErr.message }, { status: 500 });
+    if (sedeId) query = query.eq('sede_id', sedeId);
+
+    const { data, error: queryErr } = await query;
+    if (queryErr) {
+      return NextResponse.json({ error: 'Error: ' + queryErr.message }, { status: 500 });
+    }
+    if (!data || data.length === 0) {
+      hasMore = false;
+    } else {
+      allItems = allItems.concat(data);
+      if (data.length < PAGE_SIZE) hasMore = false;
+      page++;
+    }
   }
-  if (!itemsRaw?.length) {
+
+  const itemsRaw = allItems;
+  if (!itemsRaw.length) {
     return NextResponse.json({ error: 'No hay datos para exportar' }, { status: 404 });
   }
 

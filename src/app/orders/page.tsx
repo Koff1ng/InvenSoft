@@ -210,7 +210,12 @@ export default function OrdersPage() {
 
   const filteredOrders = profile?.role === 'admin'
     ? orders.filter(o => o.status !== 'borrador' || o.created_by === profile?.id)
-    : orders.filter(o => o.area_id === profile?.area_id);
+    : orders.filter(o => {
+        const myAreaIds = [profile?.area_id, ...areas.filter(a => a.parent_id === profile?.area_id).map(a => a.id)];
+        if (!myAreaIds.includes(o.area_id)) return false;
+        if (o.status === 'borrador' && o.created_by !== profile?.id) return false;
+        return true;
+      });
 
   // ── Block helpers ──
   const addBlock = () => {
@@ -269,7 +274,7 @@ export default function OrdersPage() {
     setFormError('');
 
     const { data: { user } } = await supabase.auth.getUser();
-    if (!user || !profile) return;
+    if (!user || !profile) { setFormLoading(false); return; }
 
     const areaId = orderSubArea || orderArea || profile.area_id;
     if (!areaId) { setFormError('Selecciona un área'); setFormLoading(false); return; }
@@ -325,6 +330,9 @@ export default function OrdersPage() {
 
   // ── Send order ──
   const sendOrder = async (id: string) => {
+    const order = orders.find(o => o.id === id);
+    if (!order || order.status !== 'borrador') { showToast('Solo se pueden enviar borradores', 'error'); return; }
+    if (order.created_by !== profile?.id && profile?.role !== 'admin') { showToast('No autorizado', 'error'); return; }
     const { error } = await supabase.from('orders').update({ status: 'enviado' }).eq('id', id);
     if (error) {
       showToast('Error al enviar el pedido', 'error');
@@ -340,6 +348,9 @@ export default function OrdersPage() {
 
   // ── Delete order ──
   const deleteOrder = async (id: string) => {
+    const order = orders.find(o => o.id === id);
+    if (!order || order.status !== 'borrador') { showToast('Solo se pueden eliminar borradores', 'error'); return; }
+    if (order.created_by !== profile?.id && profile?.role !== 'admin') { showToast('No autorizado', 'error'); return; }
     const isConfirmed = await askConfirm('¿Eliminar este pedido?');
     if (!isConfirmed) return;
     const { error } = await supabase.from('orders').delete().eq('id', id);
@@ -549,7 +560,12 @@ export default function OrdersPage() {
                     <label className="block text-xs font-medium text-[var(--text-muted)] uppercase tracking-wider mb-1.5">Área destino</label>
                     <select value={orderArea} onChange={e => { setOrderArea(e.target.value); setOrderSubArea(''); }} className="input-field text-sm" required>
                       <option value="">Seleccionar área...</option>
-                      {areas.filter(a => !a.parent_id).map(a => <option key={a.id} value={a.id}>{a.name}</option>)}
+                      {areas.filter(a => !a.parent_id).map(a => {
+                        const children = areas.filter(c => c.parent_id === a.id);
+                        return [a, ...children];
+                      }).flat().map(a => (
+                        <option key={a.id} value={a.id}>{a.parent_id ? `  └ ${a.name}` : a.name}</option>
+                      ))}
                     </select>
                   </div>
                 ) : (

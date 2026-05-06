@@ -57,7 +57,14 @@ export default function InventoryPage() {
 
     // Area filter
     if (p.role !== 'admin') {
-      query = query.eq('area_id', p.area_id!);
+      // Include user's area + child sub-areas
+      const childIds = areas.filter(a => a.parent_id === p.area_id).map(a => a.id);
+      const myAreaIds = [p.area_id!, ...childIds];
+      if (filterArea !== 'all') {
+        query = query.eq('area_id', filterArea);
+      } else {
+        query = query.in('area_id', myAreaIds);
+      }
     } else if (filterArea !== 'all') {
       query = query.eq('area_id', filterArea);
     }
@@ -362,17 +369,35 @@ export default function InventoryPage() {
             />
           </div>
 
-          {/* Area */}
-          {profile?.role === 'admin' && (
+          {/* Area — admin ve todas, non-admin ve sub-áreas */}
+          {profile?.role === 'admin' ? (
             <select
               value={filterArea}
               onChange={(e) => { setFilterArea(e.target.value); setPage(0); }}
               className="input-field w-auto text-xs"
             >
               <option value="all">Todas las áreas</option>
-              {areas.map(a => <option key={a.id} value={a.id}>{a.name}</option>)}
+              {areas.filter(a => !a.parent_id).map(a => {
+                const children = areas.filter(c => c.parent_id === a.id);
+                return [a, ...children];
+              }).flat().map(a => (
+                <option key={a.id} value={a.id}>{a.parent_id ? `  └ ${a.name}` : a.name}</option>
+              ))}
             </select>
-          )}
+          ) : (() => {
+            const mySubAreas = areas.filter(a => a.parent_id === profile?.area_id);
+            if (mySubAreas.length === 0) return null;
+            return (
+              <select
+                value={filterArea}
+                onChange={(e) => { setFilterArea(e.target.value); setPage(0); }}
+                className="input-field w-auto text-xs"
+              >
+                <option value="all">Todas mis sub-áreas</option>
+                {mySubAreas.map(a => <option key={a.id} value={a.id}>{a.name}</option>)}
+              </select>
+            );
+          })()}
 
           {/* Sede */}
           {profile?.role === 'admin' && sedes.length > 0 && (

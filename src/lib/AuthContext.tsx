@@ -86,6 +86,20 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     loadAuth();
+
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((event) => {
+      if (event === 'SIGNED_OUT') {
+        setUser(null);
+        setProfile(null);
+        setAreas([]);
+        setSedes([]);
+        clearAuthCache();
+      } else if (event === 'SIGNED_IN' || event === 'TOKEN_REFRESHED') {
+        loadAuth();
+      }
+    });
+
+    return () => { subscription.unsubscribe(); };
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   const value = useMemo(() => ({

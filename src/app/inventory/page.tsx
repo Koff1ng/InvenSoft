@@ -468,7 +468,7 @@ export default function InventoryPage() {
                     <div className="min-w-0 flex-1">
                       <p className="font-medium text-sm">{item.product?.name}</p>
                       <div className="flex items-center gap-2 mt-1">
-                        {profile?.role === 'admin' && item.area?.name && (
+                        {(profile?.role === 'admin' || areas.some(a => a.parent_id === profile?.area_id)) && item.area?.name && (
                           <span className="text-xs bg-[var(--bg-input)] px-1.5 py-0.5 rounded">{item.area.name}</span>
                         )}
                         {item.product?.category && (
@@ -534,7 +534,7 @@ export default function InventoryPage() {
                     <th className="py-3 px-4 cursor-pointer select-none" onClick={() => toggleSort('name')}>
                       Producto {sortIcon('name')}
                     </th>
-                    {profile?.role === 'admin' && <th className="py-3 px-4">Área</th>}
+                    {(profile?.role === 'admin' || areas.some(a => a.parent_id === profile?.area_id)) && <th className="py-3 px-4">Área</th>}
                     <th className="py-3 px-4">Categoría</th>
                     {profile?.role === 'admin' && (
                       <th className="py-3 px-4 cursor-pointer select-none" onClick={() => toggleSort('quantity')}>
@@ -553,7 +553,7 @@ export default function InventoryPage() {
                   {displayItems.map((item) => (
                     <tr key={item.id} className="border-b border-[var(--border)] hover:bg-[var(--bg-input)]/30">
                       <td className="py-3 px-4 font-medium">{item.product?.name}</td>
-                      {profile?.role === 'admin' && (
+                      {(profile?.role === 'admin' || areas.some(a => a.parent_id === profile?.area_id)) && (
                         <td className="py-3 px-4">
                           <span className="text-xs bg-[var(--bg-input)] px-2 py-1 rounded">{item.area?.name}</span>
                         </td>

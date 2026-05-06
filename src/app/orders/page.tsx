@@ -118,6 +118,7 @@ export default function OrdersPage() {
   // Create form
   const [showCreate, setShowCreate] = useState(false);
   const [orderArea, setOrderArea] = useState('');
+  const [orderSubArea, setOrderSubArea] = useState('');
   const [orderSede, setOrderSede] = useState('');
   const [orderNotes, setOrderNotes] = useState('');
   const [blocks, setBlocks] = useState<OrderBlock[]>([
@@ -256,6 +257,7 @@ export default function OrdersPage() {
     setCustomCats({});
     setOrderNotes('');
     setOrderArea(profile?.area_id || '');
+    setOrderSubArea('');
     setOrderSede('');
     setFormError('');
   };
@@ -269,7 +271,7 @@ export default function OrdersPage() {
     const { data: { user } } = await supabase.auth.getUser();
     if (!user || !profile) return;
 
-    const areaId = orderArea || profile.area_id;
+    const areaId = orderSubArea || orderArea || profile.area_id;
     if (!areaId) { setFormError('Selecciona un área'); setFormLoading(false); return; }
 
     // Flatten blocks into items with category
@@ -545,9 +547,9 @@ export default function OrdersPage() {
                 {profile?.role === 'admin' ? (
                   <div>
                     <label className="block text-xs font-medium text-[var(--text-muted)] uppercase tracking-wider mb-1.5">Área destino</label>
-                    <select value={orderArea} onChange={e => setOrderArea(e.target.value)} className="input-field text-sm" required>
+                    <select value={orderArea} onChange={e => { setOrderArea(e.target.value); setOrderSubArea(''); }} className="input-field text-sm" required>
                       <option value="">Seleccionar área...</option>
-                      {areas.map(a => <option key={a.id} value={a.id}>{a.name}</option>)}
+                      {areas.filter(a => !a.parent_id).map(a => <option key={a.id} value={a.id}>{a.name}</option>)}
                     </select>
                   </div>
                 ) : (
@@ -555,6 +557,22 @@ export default function OrdersPage() {
                     Área: <span className="font-medium text-[var(--text)]">{areas.find(a => a.id === profile?.area_id)?.name || '—'}</span>
                   </div>
                 )}
+
+                {/* Sub-área — mostrar si el área seleccionada tiene hijos */}
+                {(() => {
+                  const parentId = orderArea || profile?.area_id;
+                  const subAreas = areas.filter(a => a.parent_id === parentId);
+                  if (subAreas.length === 0) return null;
+                  return (
+                    <div>
+                      <label className="block text-xs font-medium text-[var(--text-muted)] uppercase tracking-wider mb-1.5">Sub-área</label>
+                      <select value={orderSubArea} onChange={e => setOrderSubArea(e.target.value)} className="input-field text-sm">
+                        <option value="">General (sin sub-área)</option>
+                        {subAreas.map(a => <option key={a.id} value={a.id}>{a.name}</option>)}
+                      </select>
+                    </div>
+                  );
+                })()}
 
                 {/* Sede */}
                 {sedes.length > 0 && (

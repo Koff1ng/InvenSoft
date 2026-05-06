@@ -10,11 +10,12 @@ CREATE TABLE IF NOT EXISTS public.sedes (
   created_at TIMESTAMPTZ DEFAULT now()
 );
 
--- 2. Areas table
+-- 2. Areas table (supports sub-areas via parent_id)
 CREATE TABLE IF NOT EXISTS public.areas (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   name TEXT NOT NULL UNIQUE,
   slug TEXT NOT NULL UNIQUE,
+  parent_id UUID REFERENCES public.areas(id),
   created_at TIMESTAMPTZ DEFAULT now()
 );
 

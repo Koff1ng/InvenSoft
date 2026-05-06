@@ -13,23 +13,20 @@ interface InventoryItemRow {
   quantity: number;
   updated_at: string | null;
   product: { name?: string; unit?: string; category?: string; notes?: string } | null;
-  area: { name?: string } | null;
+  area: { id?: string; name?: string; parent_id?: string | null } | null;
   sede: { name?: string } | null;
 }
 
 export async function GET(request: Request) {
   if (!SUPABASE_URL || !SUPABASE_ANON_KEY) {
-    return NextResponse.json(
-      { error: 'Exportación no disponible: faltan credenciales de Supabase en el servidor.' },
-      { status: 503 }
-    );
+    return NextResponse.json({ error: 'Credenciales faltantes' }, { status: 503 });
   }
 
   const cookieStore = await cookies();
   const supabase = createServerClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
     cookies: {
       getAll() { return cookieStore.getAll(); },
-      setAll() { /* read-only in route handler GET */ },
+      setAll() { /* read-only */ },
     },
   });
 
@@ -47,166 +44,327 @@ export async function GET(request: Request) {
   const filterSearch = url.searchParams.get('search')?.toLowerCase();
   const sedeId = url.searchParams.get('sede') || undefined;
 
+  // Fetch all inventory items with product, area, sede
   let query = supabase
     .from('inventory_items')
-    .select('area_id, quantity, updated_at, product:products(name, unit, category, notes), area:areas(name), sede:sedes(name)');
+    .select('area_id, quantity, updated_at, product:products(name, unit, category, notes), area:areas(id, name, parent_id), sede:sedes(name)');
 
   if (sedeId) query = query.eq('sede_id', sedeId);
 
   const { data: itemsRaw, error: queryErr } = await query;
   if (queryErr) {
-    return NextResponse.json({ error: 'Error al consultar el inventario: ' + queryErr.message }, { status: 500 });
+    return NextResponse.json({ error: 'Error: ' + queryErr.message }, { status: 500 });
   }
   if (!itemsRaw?.length) {
     return NextResponse.json({ error: 'No hay datos para exportar' }, { status: 404 });
   }
 
+  // Fetch all areas for grouping
+  const { data: allAreas } = await supabase.from('areas').select('id, name, slug, parent_id');
+  const areasMap = new Map((allAreas || []).map((a: any) => [a.id, a]));
+
   try {
+    const items = itemsRaw as unknown as (InventoryItemRow & { area_id: string })[];
 
-  const items = itemsRaw as unknown as (InventoryItemRow & { area_id: string })[];
+    let flatItems = items.map((i) => ({
+      area_id: i.area_id,
+      area_name: i.area?.name || '',
+      area_parent_id: (i.area as any)?.parent_id || null,
+      product_name: i.product?.name || '',
+      quantity: i.quantity,
+      product_unit: i.product?.unit || '',
+      product_category: i.product?.category || 'General',
+      product_notes: i.product?.notes || '',
+      sede_name: i.sede?.name || '',
+      updated_at: i.updated_at,
+    }));
 
-  let flatItems = items.map((i) => ({
-    area_id: i.area_id,
-    area_name: i.area?.name || '',
-    product_name: i.product?.name || '',
-    quantity: i.quantity,
-    product_unit: i.product?.unit || '',
-    product_category: i.product?.category || 'Sin Categoría',
-    product_notes: i.product?.notes || '',
-    sede_name: i.sede?.name || '',
-    updated_at: i.updated_at,
-  }));
+    if (filterArea) flatItems = flatItems.filter(i => i.area_id === filterArea);
+    if (filterCategory) flatItems = flatItems.filter(i => i.product_category === filterCategory);
+    if (filterSearch) flatItems = flatItems.filter(i => i.product_name.toLowerCase().includes(filterSearch));
 
-  if (filterArea) flatItems = flatItems.filter(i => i.area_id === filterArea);
-  if (filterCategory) flatItems = flatItems.filter(i => i.product_category === filterCategory);
-  if (filterSearch) flatItems = flatItems.filter(i => i.product_name.toLowerCase().includes(filterSearch));
+    if (flatItems.length === 0) {
+      return NextResponse.json({ error: 'No hay datos con estos filtros' }, { status: 404 });
+    }
 
-  if (flatItems.length === 0) {
-    return NextResponse.json({ error: 'No hay datos para exportar con estos filtros' }, { status: 404 });
-  }
+    const wb = new ExcelJS.Workbook();
+    wb.creator = 'La Comitiva - Sistema de Inventarios';
+    wb.created = new Date();
 
-  const wb = new ExcelJS.Workbook();
-  wb.creator = 'La Comitiva - Sistema de Inventarios';
-  wb.created = new Date();
+    const COLORS = {
+      primary: '1B4332', primaryLight: '2D6A4F', accent: '40916C',
+      headerFont: 'FFFFFF', catBg: 'E2E8F0', catFont: '334155',
+      oddRow: 'F8F9FA', evenRow: 'FFFFFF', border: 'B7B7B7',
+    };
 
-  const COLORS = {
-    primary: '1B4332', primaryLight: '2D6A4F', accent: '40916C',
-    headerFont: 'FFFFFF', catBg: 'E2E8F0', catFont: '334155',
-    oddRow: 'F8F9FA', evenRow: 'FFFFFF', border: 'B7B7B7',
-    lowStockBg: 'FFF3CD', lowStockFont: '856404',
-  };
+    const now = new Date();
+    const dateLabel = now.toLocaleDateString('es-CO', { day: '2-digit', month: '2-digit', year: '2-digit' });
 
-  const now = new Date();
+    // ═══════════════════════════════════════════════
+    // Helper: create a sheet matching "formato inv final"
+    // Columns: # GRUPO | CLAVE | DESCRIPCION | UNIDAD | TOTAL
+    // ═══════════════════════════════════════════════
+    function createAreaSheet(
+      sheetName: string,
+      areaLabel: string,
+      sheetItems: typeof flatItems,
+    ) {
+      const ws = wb.addWorksheet(sheetName, { properties: { defaultColWidth: 16 } });
 
-  // Group by category
-  const byCategory: Record<string, typeof flatItems> = {};
-  for (const item of flatItems) {
-    const cat = item.product_category;
-    if (!byCategory[cat]) byCategory[cat] = [];
-    byCategory[cat].push(item);
-  }
-  const catNames = Object.keys(byCategory).sort();
+      // ── Row 1: LA COMITIVA ──
+      ws.mergeCells('A1:E1');
+      const r1 = ws.getCell('A1');
+      r1.value = 'LA COMITIVA';
+      r1.font = { name: 'Calibri', size: 14, bold: true, color: { argb: COLORS.headerFont } };
+      r1.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: COLORS.primary } };
+      r1.alignment = { horizontal: 'center', vertical: 'middle' };
+      ws.getRow(1).height = 32;
 
-  // ── Summary sheet ──
-  const ws = wb.addWorksheet('Inventario General', { properties: { defaultColWidth: 18 } });
+      // ── Row 2: AREA ──
+      ws.mergeCells('A2:E2');
+      const r2 = ws.getCell('A2');
+      r2.value = `                 AREA:        ${areaLabel.toUpperCase()}`;
+      r2.font = { name: 'Calibri', size: 11, bold: true, color: { argb: COLORS.headerFont } };
+      r2.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: COLORS.primaryLight } };
+      r2.alignment = { vertical: 'middle' };
+      ws.getRow(2).height = 26;
 
-  ws.mergeCells('A1:F1');
-  const title = ws.getCell('A1');
-  let titleText = 'La Comitiva — Inventario Consolidado';
-  if (filterArea) titleText = `La Comitiva — Área: ${flatItems[0]?.area_name || filterArea}`;
-  if (filterCategory) titleText += ` | Cat: ${filterCategory}`;
-  title.value = titleText;
-  title.font = { name: 'Calibri', size: 16, bold: true, color: { argb: COLORS.headerFont } };
-  title.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: COLORS.primary } };
-  title.alignment = { horizontal: 'center', vertical: 'middle' };
-  ws.getRow(1).height = 42;
+      // ── Row 3: INVENTARIO FISICO ──
+      ws.mergeCells('A3:E3');
+      const r3 = ws.getCell('A3');
+      r3.value = `          INVENTARIO FISICO   ALMACÉN    ${dateLabel}`;
+      r3.font = { name: 'Calibri', size: 10, italic: true, color: { argb: COLORS.headerFont } };
+      r3.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: COLORS.accent } };
+      r3.alignment = { vertical: 'middle' };
+      ws.getRow(3).height = 22;
 
-  ws.mergeCells('A2:F2');
-  const sub = ws.getCell('A2');
-  sub.value = `Exportado el ${now.toLocaleDateString('es-CO', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' })} a las ${now.toLocaleTimeString('es-CO', { hour: '2-digit', minute: '2-digit' })}`;
-  sub.font = { name: 'Calibri', size: 10, italic: true, color: { argb: COLORS.headerFont } };
-  sub.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: COLORS.primaryLight } };
-  sub.alignment = { horizontal: 'center', vertical: 'middle' };
-  ws.getRow(2).height = 24;
+      // ── Row 4: spacer ──
+      ws.getRow(4).height = 8;
 
-  ws.getRow(3).height = 8;
+      // ── Row 5: Headers ──
+      const headers = ['# GRUPO', 'CLAVE', 'DESCRIPCION', 'UNIDAD', 'TOTAL'];
+      const hRow = ws.getRow(5);
+      headers.forEach((h, i) => {
+        const cell = hRow.getCell(i + 1);
+        cell.value = h;
+        cell.font = { name: 'Calibri', size: 10, bold: true, color: { argb: COLORS.headerFont } };
+        cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: COLORS.accent } };
+        cell.alignment = { horizontal: 'center', vertical: 'middle' };
+        cell.border = { bottom: { style: 'medium', color: { argb: COLORS.primary } } };
+      });
+      hRow.height = 24;
 
-  const headers = ['Área', 'Producto', 'Cantidad', 'Unidad', 'Notas', 'Última Actualización'];
-  const hRow = ws.getRow(4);
-  headers.forEach((h, i) => {
-    const cell = hRow.getCell(i + 1);
-    cell.value = h;
-    cell.font = { name: 'Calibri', size: 11, bold: true, color: { argb: COLORS.headerFont } };
-    cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: COLORS.accent } };
-    cell.alignment = { horizontal: 'center', vertical: 'middle' };
-    cell.border = { bottom: { style: 'medium', color: { argb: COLORS.primary } } };
-  });
-  hRow.height = 28;
+      // ── Data rows (sorted by category then name) ──
+      sheetItems.sort((a, b) => {
+        const catCmp = a.product_category.localeCompare(b.product_category);
+        if (catCmp !== 0) return catCmp;
+        return a.product_name.localeCompare(b.product_name);
+      });
 
-  let rowIdx = 5;
-  for (const catName of catNames) {
-    const catItems = byCategory[catName];
-    ws.mergeCells(`A${rowIdx}:F${rowIdx}`);
-    const catCell = ws.getRow(rowIdx).getCell(1);
-    catCell.value = `${catName}  (${catItems.length} productos)`;
-    catCell.font = { name: 'Calibri', size: 11, bold: true, color: { argb: COLORS.catFont } };
-    catCell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: COLORS.catBg } };
-    catCell.alignment = { vertical: 'middle' };
-    ws.getRow(rowIdx).height = 26;
-    rowIdx++;
+      let rowIdx = 6;
+      for (let j = 0; j < sheetItems.length; j++) {
+        const item = sheetItems[j];
+        const isOdd = j % 2 === 0;
+        const row = ws.getRow(rowIdx);
 
-    for (let j = 0; j < catItems.length; j++) {
-      const item = catItems[j];
-      const row = ws.getRow(rowIdx);
+        const vals: (string | number)[] = [
+          item.product_category.toUpperCase(),
+          '', // CLAVE - no tenemos clave, dejamos vacío
+          item.product_name,
+          item.product_unit,
+          item.quantity,
+        ];
+
+        vals.forEach((val, i) => {
+          const cell = row.getCell(i + 1);
+          cell.value = val;
+          cell.font = { name: 'Calibri', size: 10 };
+          cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: isOdd ? COLORS.oddRow : COLORS.evenRow } };
+          cell.border = { bottom: { style: 'thin', color: { argb: COLORS.border } } };
+          cell.alignment = { vertical: 'middle' };
+
+          if (i === 0) cell.alignment = { horizontal: 'left', vertical: 'middle' };
+          if (i === 1 || i === 3) cell.alignment = { horizontal: 'center', vertical: 'middle' };
+          if (i === 4) {
+            cell.alignment = { horizontal: 'center', vertical: 'middle' };
+            cell.numFmt = '#,##0.##';
+          }
+        });
+
+        row.height = 20;
+        rowIdx++;
+      }
+
+      // Column widths matching formato inv final
+      ws.getColumn(1).width = 16; // # GRUPO
+      ws.getColumn(2).width = 10; // CLAVE
+      ws.getColumn(3).width = 42; // DESCRIPCION
+      ws.getColumn(4).width = 10; // UNIDAD
+      ws.getColumn(5).width = 10; // TOTAL
+
+      return ws;
+    }
+
+    // ═══════════════════════════════════════════════
+    // CONSOLIDADO sheet (all items, with extra columns)
+    // Columns: # GRUPO | CLAVE | DESCRIPCION | UNIDAD | TOTAL | AREA
+    // ═══════════════════════════════════════════════
+    const wsConsolidado = wb.addWorksheet('CONSOLIDADO', { properties: { defaultColWidth: 16 } });
+
+    // Row 1
+    wsConsolidado.mergeCells('A1:F1');
+    const c1 = wsConsolidado.getCell('A1');
+    c1.value = 'LA COMITIVA';
+    c1.font = { name: 'Calibri', size: 14, bold: true, color: { argb: COLORS.headerFont } };
+    c1.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: COLORS.primary } };
+    c1.alignment = { horizontal: 'center', vertical: 'middle' };
+    wsConsolidado.getRow(1).height = 32;
+
+    // Row 2
+    wsConsolidado.mergeCells('A2:F2');
+    const c2 = wsConsolidado.getCell('A2');
+    c2.value = 'CLL 4 NO. 34-32 CALI VALLE DEL CAUCA COL';
+    c2.font = { name: 'Calibri', size: 10, color: { argb: COLORS.headerFont } };
+    c2.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: COLORS.primaryLight } };
+    c2.alignment = { horizontal: 'center', vertical: 'middle' };
+    wsConsolidado.getRow(2).height = 22;
+
+    // Row 3
+    wsConsolidado.mergeCells('A3:F3');
+    const c3 = wsConsolidado.getCell('A3');
+    c3.value = `INVENTARIO FISICO   ALMACÉN: 1     ${dateLabel}`;
+    c3.font = { name: 'Calibri', size: 10, italic: true, color: { argb: COLORS.headerFont } };
+    c3.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: COLORS.accent } };
+    c3.alignment = { horizontal: 'center', vertical: 'middle' };
+    wsConsolidado.getRow(3).height = 22;
+
+    // Row 4: spacer
+    wsConsolidado.getRow(4).height = 8;
+
+    // Row 5: Headers
+    const consHeaders = ['# GRUPO', 'CLAVE', 'DESCRIPCION', 'UNIDAD', 'TOTAL', 'AREA'];
+    const consHRow = wsConsolidado.getRow(5);
+    consHeaders.forEach((h, i) => {
+      const cell = consHRow.getCell(i + 1);
+      cell.value = h;
+      cell.font = { name: 'Calibri', size: 10, bold: true, color: { argb: COLORS.headerFont } };
+      cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: COLORS.accent } };
+      cell.alignment = { horizontal: 'center', vertical: 'middle' };
+      cell.border = { bottom: { style: 'medium', color: { argb: COLORS.primary } } };
+    });
+    consHRow.height = 24;
+
+    // Consolidado: deduplicate products, sum quantities
+    const productMap = new Map<string, { category: string; name: string; unit: string; totalQty: number; areas: Set<string> }>();
+    for (const item of flatItems) {
+      const key = item.product_name.toLowerCase();
+      if (productMap.has(key)) {
+        const existing = productMap.get(key)!;
+        existing.totalQty += item.quantity;
+        existing.areas.add(item.area_name);
+      } else {
+        productMap.set(key, {
+          category: item.product_category,
+          name: item.product_name,
+          unit: item.product_unit,
+          totalQty: item.quantity,
+          areas: new Set([item.area_name]),
+        });
+      }
+    }
+
+    const consolidated = Array.from(productMap.values()).sort((a, b) => {
+      const catCmp = a.category.localeCompare(b.category);
+      if (catCmp !== 0) return catCmp;
+      return a.name.localeCompare(b.name);
+    });
+
+    let consRowIdx = 6;
+    for (let j = 0; j < consolidated.length; j++) {
+      const item = consolidated[j];
       const isOdd = j % 2 === 0;
-      const qty = Number(item.quantity) || 0;
-      const isLow = qty <= 5;
+      const row = wsConsolidado.getRow(consRowIdx);
 
-      const vals = [item.area_name, item.product_name, qty, item.product_unit, item.product_notes,
-        item.updated_at ? new Date(item.updated_at).toLocaleString('es-CO') : ''];
+      const vals: (string | number)[] = [
+        item.category.toUpperCase(),
+        '',
+        item.name,
+        item.unit,
+        item.totalQty,
+        Array.from(item.areas).join(', '),
+      ];
 
       vals.forEach((val, i) => {
         const cell = row.getCell(i + 1);
         cell.value = val;
         cell.font = { name: 'Calibri', size: 10 };
-        cell.alignment = { vertical: 'middle', wrapText: i === 4 };
-        cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: isLow && i === 2 ? COLORS.lowStockBg : (isOdd ? COLORS.oddRow : COLORS.evenRow) } };
+        cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: isOdd ? COLORS.oddRow : COLORS.evenRow } };
         cell.border = { bottom: { style: 'thin', color: { argb: COLORS.border } } };
-        if (i === 2) { cell.alignment = { horizontal: 'center', vertical: 'middle' }; cell.numFmt = '#,##0.##'; if (isLow) cell.font = { name: 'Calibri', size: 10, bold: true, color: { argb: COLORS.lowStockFont } }; }
-        if (i === 3) cell.alignment = { horizontal: 'center', vertical: 'middle' };
+        cell.alignment = { vertical: 'middle' };
+        if (i === 1 || i === 3) cell.alignment = { horizontal: 'center', vertical: 'middle' };
+        if (i === 4) { cell.alignment = { horizontal: 'center', vertical: 'middle' }; cell.numFmt = '#,##0.##'; }
       });
-      row.height = 22;
-      rowIdx++;
+      row.height = 20;
+      consRowIdx++;
     }
-    ws.getRow(rowIdx).height = 6;
-    rowIdx++;
-  }
 
-  rowIdx++;
-  ws.mergeCells(`A${rowIdx}:F${rowIdx}`);
-  const footer = ws.getCell(`A${rowIdx}`);
-  const lowCount = flatItems.filter(i => (Number(i.quantity) || 0) <= 5).length;
-  footer.value = `Total: ${flatItems.length} productos en ${catNames.length} categorías  |  Stock bajo (≤5): ${lowCount} productos`;
-  footer.font = { name: 'Calibri', size: 10, italic: true, color: { argb: COLORS.primaryLight } };
-  footer.alignment = { horizontal: 'center', vertical: 'middle' };
-  ws.getRow(rowIdx).height = 28;
+    wsConsolidado.getColumn(1).width = 16;
+    wsConsolidado.getColumn(2).width = 10;
+    wsConsolidado.getColumn(3).width = 42;
+    wsConsolidado.getColumn(4).width = 10;
+    wsConsolidado.getColumn(5).width = 10;
+    wsConsolidado.getColumn(6).width = 30;
 
-  ws.getColumn(1).width = 16; ws.getColumn(2).width = 28; ws.getColumn(3).width = 12;
-  ws.getColumn(4).width = 14; ws.getColumn(5).width = 30; ws.getColumn(6).width = 22;
+    // ═══════════════════════════════════════════════
+    // One sheet per area (sub-areas get their own sheet)
+    // ═══════════════════════════════════════════════
+    const byArea = new Map<string, typeof flatItems>();
+    for (const item of flatItems) {
+      const areaId = item.area_id;
+      if (!byArea.has(areaId)) byArea.set(areaId, []);
+      byArea.get(areaId)!.push(item);
+    }
 
-  const buffer = Buffer.from(await wb.xlsx.writeBuffer());
-  const dateStr = now.toISOString().split('T')[0];
+    // Sort areas: parent areas first, then their children
+    const sortedAreaIds = Array.from(byArea.keys()).sort((a, b) => {
+      const aArea = areasMap.get(a);
+      const bArea = areasMap.get(b);
+      const aName = aArea?.name || '';
+      const bName = bArea?.name || '';
+      return aName.localeCompare(bName);
+    });
 
-  return new NextResponse(buffer, {
-    headers: {
-      'Content-Type': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-      'Content-Disposition': `attachment; filename="Inventario_LaComitiva_${dateStr}.xlsx"`,
-      'Cache-Control': 'no-store, max-age=0',
-    },
-  });
+    for (const areaId of sortedAreaIds) {
+      const areaItems = byArea.get(areaId)!;
+      const areaInfo = areasMap.get(areaId);
+      const areaName = areaInfo?.name || areaItems[0]?.area_name || 'Área';
+      // Sheet name max 31 chars, no special chars
+      const sheetName = areaName.replace(/[\\/*?[\]:]/g, '').substring(0, 31).trim();
+
+      // Skip if sheet already exists (duplicate name edge case)
+      try {
+        createAreaSheet(sheetName, areaName, areaItems);
+      } catch {
+        // Sheet name conflict — add suffix
+        try {
+          createAreaSheet(sheetName.substring(0, 28) + ' (2)', areaName, areaItems);
+        } catch { /* skip */ }
+      }
+    }
+
+    const buffer = Buffer.from(await wb.xlsx.writeBuffer());
+    const dateStr = now.toISOString().split('T')[0];
+
+    return new NextResponse(buffer, {
+      headers: {
+        'Content-Type': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+        'Content-Disposition': `attachment; filename="Inventario_LaComitiva_${dateStr}.xlsx"`,
+        'Cache-Control': 'no-store, max-age=0',
+      },
+    });
 
   } catch (err: any) {
     console.error('Export error:', err);
-    return NextResponse.json({ error: 'Error generando el archivo Excel: ' + (err?.message || 'desconocido') }, { status: 500 });
+    return NextResponse.json({ error: 'Error generando Excel: ' + (err?.message || 'desconocido') }, { status: 500 });
   }
 }

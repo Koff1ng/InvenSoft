@@ -75,16 +75,6 @@ CREATE TABLE IF NOT EXISTS public.orders (
   created_at TIMESTAMPTZ DEFAULT now()
 );
 
--- 8. Order items table
-CREATE TABLE IF NOT EXISTS public.order_items (
-  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  order_id UUID NOT NULL REFERENCES public.orders(id) ON DELETE CASCADE,
-  product_name TEXT NOT NULL,
-  quantity NUMERIC NOT NULL DEFAULT 0,
-  unit TEXT NOT NULL DEFAULT 'unidades',
-  notes TEXT
-);
-
 -- ============================================
 -- Row Level Security (RLS) - DISABLE for now
 -- (enable later once auth is fully tested)
@@ -97,7 +87,6 @@ ALTER TABLE public.products ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.inventory_items ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.inventory_updates ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.orders ENABLE ROW LEVEL SECURITY;
-ALTER TABLE public.order_items ENABLE ROW LEVEL SECURITY;
 
 -- Allow all authenticated users to read/write (permissive for initial setup)
 -- You can tighten these later with role-based policies
@@ -109,7 +98,6 @@ CREATE POLICY "allow_all_products" ON public.products FOR ALL TO authenticated U
 CREATE POLICY "allow_all_inventory_items" ON public.inventory_items FOR ALL TO authenticated USING (true) WITH CHECK (true);
 CREATE POLICY "allow_all_inventory_updates" ON public.inventory_updates FOR ALL TO authenticated USING (true) WITH CHECK (true);
 CREATE POLICY "allow_all_orders" ON public.orders FOR ALL TO authenticated USING (true) WITH CHECK (true);
-CREATE POLICY "allow_all_order_items" ON public.order_items FOR ALL TO authenticated USING (true) WITH CHECK (true);
 
 -- ============================================
 -- Seed Data

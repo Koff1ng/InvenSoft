@@ -39,7 +39,6 @@ export default function HistoryPage() {
   const supabase = useMemo(() => createClient(), []);
   const { profile, loading: authLoading } = useAuth();
   const [entries, setEntries] = useState<HistoryEntry[]>([]);
-  const [loading, setLoading] = useState(true);
   const [page, setPage] = useState(0);
   const [totalCount, setTotalCount] = useState(0);
   const [dateFrom, setDateFrom] = useState('');
@@ -125,12 +124,11 @@ export default function HistoryPage() {
 
     setEntries(enriched);
     setTotalCount(count || 0);
-    setLoading(false);
   }, [supabase, profile, page, dateFrom, dateTo]);
 
   useEffect(() => {
-    if (!authLoading && profile) loadData();
-  }, [authLoading, loadData]);
+    if (!authLoading && profile) { loadData(); }
+  }, [authLoading, profile, loadData]);
 
   const totalPages = Math.ceil(totalCount / PAGE_SIZE);
 

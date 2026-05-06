@@ -93,7 +93,7 @@ export function ToastAndConfirmProvider({ children }: { children: ReactNode }) {
               t.exiting ? 'toast-exit opacity-0 scale-95 translate-y-2' : 'toast-enter opacity-100 scale-100 translate-y-0'
             } ${
               t.type === 'error' ? 'bg-red-500/80 border-red-500/50 text-white' : 
-              t.type === 'success' ? 'bg-[var(--primary)]/90 border-[var(--primary-hover)]/50 text-white' : 
+              t.type === 'success' ? 'bg-[var(--accent)]/90 border-[var(--accent-hover)]/50 text-white' : 
               'bg-[var(--bg-card)]/90 border-[var(--border)] text-[var(--text)]'
             }`}
           >

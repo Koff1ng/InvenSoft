@@ -107,7 +107,7 @@ export default function InventoryPage() {
   }, [supabase, profile, debouncedSearch, sortField, sortDir, page, filterArea, filterSede, filterCategory, dateFrom, dateTo]);
 
   useEffect(() => {
-    if (!authLoading && profile) loadData();
+    if (!authLoading && profile) { loadData(); }
   }, [authLoading]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {

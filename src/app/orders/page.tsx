@@ -43,7 +43,7 @@ interface CatalogProduct {
 }
 
 const UNITS = ['unidades', 'kg', 'lb', 'litros', 'paquetes', 'cajas', 'botellas', 'gramos', 'onzas'];
-const DEFAULT_CATEGORIES = ['Abarrotes', 'Fruver', 'Cárnicos', 'Lácteos', 'Bebidas', 'Limpieza', 'Desechables'];
+const DEFAULT_CATEGORIES = ['Abarrotes', 'Fruver'];
 
 function emptyItem(): OrderItem {
   return { product_name: '', quantity: '', unit: 'unidades', notes: '' };

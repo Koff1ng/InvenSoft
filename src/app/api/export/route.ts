@@ -61,6 +61,8 @@ export async function GET(request: Request) {
     return NextResponse.json({ error: 'No hay datos para exportar' }, { status: 404 });
   }
 
+  try {
+
   const items = itemsRaw as unknown as (InventoryItemRow & { area_id: string })[];
 
   let flatItems = items.map((i) => ({
@@ -192,7 +194,7 @@ export async function GET(request: Request) {
   ws.getColumn(1).width = 16; ws.getColumn(2).width = 28; ws.getColumn(3).width = 12;
   ws.getColumn(4).width = 14; ws.getColumn(5).width = 30; ws.getColumn(6).width = 22;
 
-  const buffer = await wb.xlsx.writeBuffer();
+  const buffer = Buffer.from(await wb.xlsx.writeBuffer());
   const dateStr = now.toISOString().split('T')[0];
 
   return new NextResponse(buffer, {
@@ -202,4 +204,9 @@ export async function GET(request: Request) {
       'Cache-Control': 'no-store, max-age=0',
     },
   });
+
+  } catch (err: any) {
+    console.error('Export error:', err);
+    return NextResponse.json({ error: 'Error generando el archivo Excel: ' + (err?.message || 'desconocido') }, { status: 500 });
+  }
 }

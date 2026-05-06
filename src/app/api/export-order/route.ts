@@ -56,13 +56,23 @@ export async function GET(request: Request) {
 
   const { data: order, error: orderErr } = await supabase
     .from('orders')
-    .select('*, area:areas(name), sede:sedes(name), creator:profiles!orders_created_by_fkey(full_name)')
+    .select('*')
     .eq('id', orderId)
     .single();
 
   if (orderErr || !order) {
     return NextResponse.json({ error: 'Pedido no encontrado' }, { status: 404 });
   }
+
+  // Enrich with area, sede, creator names
+  const [areaRes, sedeRes, creatorRes] = await Promise.all([
+    order.area_id ? supabase.from('areas').select('name').eq('id', order.area_id).single() : { data: null },
+    order.sede_id ? supabase.from('sedes').select('name').eq('id', order.sede_id).single() : { data: null },
+    order.created_by ? supabase.from('profiles').select('full_name').eq('id', order.created_by).single() : { data: null },
+  ]);
+  const areaName = areaRes.data?.name || '—';
+  const sedeName = sedeRes.data?.name || null;
+  const creatorName = creatorRes.data?.full_name || '—';
 
   // Authorization: admin can export anything (except others' borradores).
   // Non-admin can export only orders from their own area, OR orders they created.
@@ -79,6 +89,8 @@ export async function GET(request: Request) {
       return NextResponse.json({ error: 'No autorizado' }, { status: 403 });
     }
   }
+
+  try {
 
   const items: OrderItem[] = Array.isArray(order.items) ? order.items : [];
 
@@ -114,8 +126,8 @@ export async function GET(request: Request) {
   // Info
   ws.mergeCells('A2:E2');
   const sub = ws.getCell('A2');
-  const sedeLabel = order.sede?.name ? `  |  Sede: ${order.sede.name}` : '';
-  sub.value = `Área: ${order.area?.name || '—'}${sedeLabel}  |  Creado por: ${order.creator?.full_name || '—'}`;
+  const sedeLabel = sedeName ? `  |  Sede: ${sedeName}` : '';
+  sub.value = `Área: ${areaName}${sedeLabel}  |  Creado por: ${creatorName}`;
   sub.font = { name: 'Calibri', size: 11, color: { argb: COLORS.headerFont } };
   sub.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: COLORS.primaryLight } };
   sub.alignment = { horizontal: 'center', vertical: 'middle' };
@@ -215,8 +227,8 @@ export async function GET(request: Request) {
   ws.getColumn(1).width = 6; ws.getColumn(2).width = 30; ws.getColumn(3).width = 12;
   ws.getColumn(4).width = 14; ws.getColumn(5).width = 28;
 
-  const buffer = await wb.xlsx.writeBuffer();
-  const areaSlug = String(order.area?.name || 'pedido').replace(/[^\w\-]+/g, '_').slice(0, 40);
+  const buffer = Buffer.from(await wb.xlsx.writeBuffer());
+  const areaSlug = String(areaName).replace(/[^\w\-]+/g, '_').slice(0, 40);
   const dateStr = orderDate.toISOString().split('T')[0];
 
   return new NextResponse(buffer, {
@@ -226,4 +238,9 @@ export async function GET(request: Request) {
       'Cache-Control': 'no-store, max-age=0',
     },
   });
+
+  } catch (err: any) {
+    console.error('Export-order error:', err);
+    return NextResponse.json({ error: 'Error generando el archivo Excel: ' + (err?.message || 'desconocido') }, { status: 500 });
+  }
 }

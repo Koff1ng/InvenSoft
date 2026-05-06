@@ -198,11 +198,14 @@ export default function OrdersPage() {
   }, [showCreate, catalog.length, loadCatalog]);
 
   useEffect(() => {
-    if (!authLoading && profile) {
+    if (authLoading) return;
+    if (profile) {
       if (profile.area_id) setOrderArea(profile.area_id);
       loadOrders().then(() => setLoading(false));
+    } else {
+      setLoading(false);
     }
-  }, [authLoading]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [authLoading, profile]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const filteredOrders = profile?.role === 'admin'
     ? orders.filter(o => o.status !== 'borrador' || o.created_by === profile?.id)

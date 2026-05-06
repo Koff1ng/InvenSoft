@@ -205,7 +205,8 @@ export default function DashboardPage() {
   }, [supabase, router]);
 
   useEffect(() => {
-    if (!authLoading && profile) { loadData(); }
+    if (authLoading) return;
+    if (profile) { loadData(); } else { setLoading(false); }
   }, [authLoading, profile]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Realtime

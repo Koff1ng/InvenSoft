@@ -107,8 +107,9 @@ export default function InventoryPage() {
   }, [supabase, profile, debouncedSearch, sortField, sortDir, page, filterArea, filterSede, filterCategory, dateFrom, dateTo]);
 
   useEffect(() => {
-    if (!authLoading && profile) { loadData(); }
-  }, [authLoading]); // eslint-disable-line react-hooks/exhaustive-deps
+    if (authLoading) return;
+    if (profile) { loadData(); } else { setLoading(false); }
+  }, [authLoading, profile]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
     if (profile) loadData();

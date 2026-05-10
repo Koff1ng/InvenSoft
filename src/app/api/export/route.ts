@@ -57,6 +57,8 @@ export async function GET(request: Request) {
     let query = supabase
       .from('inventory_items')
       .select('area_id, quantity, updated_at, product:products(name, unit, category, notes), area:areas(id, name, parent_id), sede:sedes(name)')
+      // Required with .range(): without ORDER BY, pages can overlap or skip rows (Postgres undefined order).
+      .order('id', { ascending: true })
       .range(from, to);
 
     if (sedeId) query = query.eq('sede_id', sedeId);

@@ -10,7 +10,13 @@ let _client: ReturnType<typeof createBrowserClient> | null = null;
 export function createClient() {
   if (IS_CLOUD) {
     if (!_client) {
-      _client = createBrowserClient(SUPABASE_URL!, SUPABASE_ANON_KEY!);
+      _client = createBrowserClient(SUPABASE_URL!, SUPABASE_ANON_KEY!, {
+        cookieOptions: {
+          // Session cookie — expires when the browser closes
+          maxAge: 0,
+        },
+        isSingleton: true,
+      });
     }
     return _client;
   }

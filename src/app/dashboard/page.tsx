@@ -400,7 +400,7 @@ export default function DashboardPage() {
             <p className="text-2xl font-bold" style={{ color: '#3b82f6' }}>{orderCount}</p>
             <p className="text-xs text-[var(--text-muted)]">Pedidos</p>
           </div>
-          <Link href="/inventory/count" className="card text-center py-4 hover:border-[var(--primary)] transition-colors">
+          <Link href="/count" className="card text-center py-4 hover:border-[var(--primary)] transition-colors">
             <p className="text-2xl font-bold" style={{ color: pendingCounts > 0 ? '#eab308' : 'var(--success)' }}>
               {pendingCounts}
             </p>

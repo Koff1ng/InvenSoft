@@ -186,11 +186,38 @@ export async function POST(request: NextRequest) {
     }
     if (operation === 'update') {
       if (!filters?.id) return NextResponse.json({ error: 'Missing id' }, { status: 400 });
-      if (data.status) db.updateOrderStatus(filters.id, data.status);
+      if (data.status) {
+        const order = db.getOrderById(filters.id);
+        if (!order) return NextResponse.json({ error: 'Pedido no encontrado' }, { status: 404 });
+        if (data.status === 'aprobado') {
+          if (session.profile?.role !== 'admin') {
+            return NextResponse.json({ error: 'No autorizado' }, { status: 403 });
+          }
+          if (order.status !== 'enviado') {
+            return NextResponse.json({ error: 'Solo se pueden aprobar pedidos enviados' }, { status: 403 });
+          }
+        } else if (data.status === 'enviado') {
+          if (order.status !== 'borrador') {
+            return NextResponse.json({ error: 'Solo borradores se pueden enviar' }, { status: 403 });
+          }
+          if (session.profile?.role !== 'admin' && order.created_by !== session.user.id) {
+            return NextResponse.json({ error: 'No autorizado' }, { status: 403 });
+          }
+        }
+        db.updateOrderStatus(filters.id, data.status);
+      }
       return NextResponse.json({ data: null, error: null });
     }
     if (operation === 'delete') {
       if (!filters?.id) return NextResponse.json({ error: 'Missing id' }, { status: 400 });
+      if (session.profile?.role !== 'admin') {
+        return NextResponse.json({ error: 'No autorizado' }, { status: 403 });
+      }
+      const order = db.getOrderById(filters.id);
+      if (!order) return NextResponse.json({ error: 'Pedido no encontrado' }, { status: 404 });
+      if (order.status !== 'enviado') {
+        return NextResponse.json({ error: 'Solo se pueden eliminar pedidos enviados' }, { status: 403 });
+      }
       db.deleteOrder(filters.id);
       return NextResponse.json({ data: null, error: null });
     }

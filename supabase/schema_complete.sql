@@ -89,6 +89,17 @@ ALTER TABLE public.inventory_items ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.inventory_updates ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.orders ENABLE ROW LEVEL SECURITY;
 
+-- Helpers for orders RLS (SECURITY DEFINER avoids recursion when policies read profiles)
+CREATE OR REPLACE FUNCTION public.get_user_role()
+RETURNS TEXT AS $$
+  SELECT role FROM public.profiles WHERE id = auth.uid();
+$$ LANGUAGE SQL SECURITY DEFINER STABLE;
+
+CREATE OR REPLACE FUNCTION public.get_user_area_id()
+RETURNS UUID AS $$
+  SELECT area_id FROM public.profiles WHERE id = auth.uid();
+$$ LANGUAGE SQL SECURITY DEFINER STABLE;
+
 -- Allow all authenticated users to read/write (permissive for initial setup)
 -- You can tighten these later with role-based policies
 
@@ -98,7 +109,35 @@ CREATE POLICY "allow_all_profiles" ON public.profiles FOR ALL TO authenticated U
 CREATE POLICY "allow_all_products" ON public.products FOR ALL TO authenticated USING (true) WITH CHECK (true);
 CREATE POLICY "allow_all_inventory_items" ON public.inventory_items FOR ALL TO authenticated USING (true) WITH CHECK (true);
 CREATE POLICY "allow_all_inventory_updates" ON public.inventory_updates FOR ALL TO authenticated USING (true) WITH CHECK (true);
-CREATE POLICY "allow_all_orders" ON public.orders FOR ALL TO authenticated USING (true) WITH CHECK (true);
+
+-- Orders: enforce creator/admin rules at the database (anon UI checks are not enough)
+CREATE POLICY "orders_select" ON public.orders FOR SELECT TO authenticated
+  USING (
+    public.get_user_role() = 'admin'
+    OR area_id = public.get_user_area_id()
+    OR area_id IN (SELECT id FROM public.areas WHERE parent_id = public.get_user_area_id())
+  );
+
+CREATE POLICY "orders_insert" ON public.orders FOR INSERT TO authenticated
+  WITH CHECK (
+    created_by = auth.uid()
+    AND (
+      public.get_user_role() = 'admin'
+      OR area_id = public.get_user_area_id()
+      OR area_id IN (SELECT id FROM public.areas WHERE parent_id = public.get_user_area_id())
+    )
+  );
+
+CREATE POLICY "orders_update_admin" ON public.orders FOR UPDATE TO authenticated
+  USING (public.get_user_role() = 'admin')
+  WITH CHECK (public.get_user_role() = 'admin');
+
+CREATE POLICY "orders_update_creator_send" ON public.orders FOR UPDATE TO authenticated
+  USING (created_by = auth.uid() AND status = 'borrador')
+  WITH CHECK (created_by = auth.uid() AND status = 'enviado');
+
+CREATE POLICY "orders_delete_admin_sent" ON public.orders FOR DELETE TO authenticated
+  USING (public.get_user_role() = 'admin' AND status = 'enviado');
 
 -- ============================================
 -- Seed Data

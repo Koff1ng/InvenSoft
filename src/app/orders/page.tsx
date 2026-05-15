@@ -350,11 +350,17 @@ export default function OrdersPage() {
     const order = orders.find(o => o.id === id);
     if (!order) return;
     if (profile?.role !== 'admin') { showToast('Solo el administrador puede eliminar pedidos', 'error'); return; }
+    if (order.status !== 'enviado') { showToast('Solo se pueden eliminar pedidos enviados', 'error'); return; }
     const isConfirmed = await askConfirm('¿Eliminar este pedido?');
     if (!isConfirmed) return;
-    const { error } = await supabase.from('orders').delete().eq('id', id);
-    if (error) {
-      showToast('Error al eliminar', 'error');
+    const res = await fetch('/api/orders/delete', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ id }),
+    });
+    const payload = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      showToast(typeof payload.error === 'string' ? payload.error : 'Error al eliminar', 'error');
       return;
     }
     showToast('Pedido eliminado', 'success');
@@ -364,11 +370,17 @@ export default function OrdersPage() {
 
   // ── Approve order ──
   const approveOrder = async (id: string) => {
+    if (profile?.role !== 'admin') { showToast('No autorizado', 'error'); return; }
     const isConfirmed = await askConfirm('¿Aprobar este pedido?');
     if (!isConfirmed) return;
-    const { error } = await supabase.from('orders').update({ status: 'aprobado' }).eq('id', id);
-    if (error) {
-      showToast('Error al aprobar: ' + error.message, 'error');
+    const res = await fetch('/api/orders/approve', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ id }),
+    });
+    const payload = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      showToast(typeof payload.error === 'string' ? payload.error : 'Error al aprobar', 'error');
       return;
     }
     showToast('Pedido aprobado correctamente', 'success');
@@ -517,7 +529,7 @@ export default function OrdersPage() {
                     <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
                   </button>
 
-                  {profile?.role === 'admin' && (
+                  {profile?.role === 'admin' && o.status === 'enviado' && (
                     <button onClick={() => deleteOrder(o.id)} className="p-1.5 rounded-md hover:bg-red-500/10 text-[var(--text-muted)] hover:text-red-400" title="Eliminar">
                       <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>
                     </button>

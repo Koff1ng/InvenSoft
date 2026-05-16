@@ -1,7 +1,54 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { cookies } from 'next/headers';
+import { createServerClient } from '@supabase/ssr';
 import { createClient } from '@supabase/supabase-js';
+import { getUserFromRequest } from '@/app/api/local-auth/route';
+import { getProfileById } from '@/lib/local-db';
 
-const IS_CLOUD = !!(process.env.NEXT_PUBLIC_SUPABASE_URL && process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY);
+const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL;
+const SUPABASE_ANON_KEY = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+const IS_CLOUD = !!(SUPABASE_URL && SUPABASE_ANON_KEY);
+
+/** App Router does not run auth on /api/* — every privileged handler must verify the caller. */
+async function requireAdmin(req: NextRequest): Promise<NextResponse | null> {
+  if (!IS_CLOUD) {
+    const user = getUserFromRequest(req);
+    if (!user) {
+      return NextResponse.json({ error: 'No autorizado' }, { status: 401 });
+    }
+    const profile = getProfileById(user.id);
+    if (!profile || profile.role !== 'admin') {
+      return NextResponse.json({ error: 'No autorizado' }, { status: 403 });
+    }
+    return null;
+  }
+
+  const cookieStore = await cookies();
+  const supabase = createServerClient(SUPABASE_URL!, SUPABASE_ANON_KEY!, {
+    cookies: {
+      getAll() {
+        return cookieStore.getAll();
+      },
+      setAll() {
+        /* read-only */
+      },
+    },
+  });
+
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) {
+    return NextResponse.json({ error: 'No autorizado' }, { status: 401 });
+  }
+
+  const { data: profile } = await supabase.from('profiles').select('role').eq('id', user.id).single();
+  if (!profile || profile.role !== 'admin') {
+    return NextResponse.json({ error: 'No autorizado' }, { status: 403 });
+  }
+
+  return null;
+}
 
 // Admin API: uses service_role key to manage users without affecting current session
 function getAdminClient() {
@@ -20,6 +67,9 @@ function toAuthEmail(username: string): string {
 }
 
 export async function POST(req: NextRequest) {
+  const denied = await requireAdmin(req);
+  if (denied) return denied;
+
   try {
     const body = await req.json();
     const { username, password, full_name, role, area_id } = body;
@@ -87,6 +137,9 @@ export async function POST(req: NextRequest) {
 // `profiles` table directly from the client. This endpoint exists because those
 // require admin/service_role privileges that the browser session doesn't have.
 export async function PATCH(req: NextRequest) {
+  const denied = await requireAdmin(req);
+  if (denied) return denied;
+
   try {
     const body = await req.json();
     const { id, password, username } = body as { id?: string; password?: string; username?: string };

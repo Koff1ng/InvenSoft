@@ -54,6 +54,7 @@ export default function PhysicalCountPage() {
   const [detailCount, setDetailCount] = useState<PhysicalCount | null>(null);
   const [reviewNotes, setReviewNotes] = useState('');
   const [reviewLoading, setReviewLoading] = useState(false);
+  const [reviewError, setReviewError] = useState('');
   const [exportingId, setExportingId] = useState<string | null>(null);
 
   const loadCounts = useCallback(async (prof: Profile) => {
@@ -184,58 +185,91 @@ export default function PhysicalCountPage() {
   // Admin: approve count
   const approveCount = async (count: PhysicalCount) => {
     setReviewLoading(true);
-    const { data: { user } } = await supabase.auth.getUser();
-    if (!user) return;
-
-    // Apply quantities
-    for (const item of count.items) {
-      if (item.counted_qty !== item.system_qty) {
-        await supabase.from('inventory_items').update({
-          quantity: item.counted_qty,
-          updated_at: new Date().toISOString(),
-          updated_by: user.id,
-        }).eq('id', item.inventory_item_id);
-
-        await supabase.from('inventory_updates').insert({
-          inventory_item_id: item.inventory_item_id,
-          previous_qty: item.system_qty,
-          new_qty: item.counted_qty,
-          updated_by: user.id,
-          notes: `Conteo físico aprobado${reviewNotes ? ': ' + reviewNotes : ''}`,
-        });
+    setReviewError('');
+    try {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) {
+        setReviewError('Sesión expirada. Vuelve a iniciar sesión.');
+        return;
       }
+
+      // Apply quantities — must not mark aprobado if any write fails
+      for (const item of count.items) {
+        if (item.counted_qty !== item.system_qty) {
+          const { error: updErr } = await supabase.from('inventory_items').update({
+            quantity: item.counted_qty,
+            updated_at: new Date().toISOString(),
+            updated_by: user.id,
+          }).eq('id', item.inventory_item_id);
+
+          if (updErr) {
+            setReviewError(`No se pudo actualizar el inventario (${item.product_name}): ${updErr.message}`);
+            return;
+          }
+
+          const { error: logErr } = await supabase.from('inventory_updates').insert({
+            inventory_item_id: item.inventory_item_id,
+            previous_qty: item.system_qty,
+            new_qty: item.counted_qty,
+            updated_by: user.id,
+            notes: `Conteo físico aprobado${reviewNotes ? ': ' + reviewNotes : ''}`,
+          });
+
+          if (logErr) {
+            setReviewError(`No se pudo registrar el movimiento (${item.product_name}): ${logErr.message}`);
+            return;
+          }
+        }
+      }
+
+      const { error: statusErr } = await supabase.from('physical_counts').update({
+        status: 'aprobado',
+        reviewed_by: user.id,
+        review_notes: reviewNotes || null,
+        reviewed_at: new Date().toISOString(),
+      }).eq('id', count.id);
+
+      if (statusErr) {
+        setReviewError(`El inventario se actualizó pero no se pudo cerrar el conteo: ${statusErr.message}`);
+        return;
+      }
+
+      setDetailCount(null);
+      setReviewNotes('');
+      if (profile) loadCounts(profile);
+    } finally {
+      setReviewLoading(false);
     }
-
-    // Update count status
-    await supabase.from('physical_counts').update({
-      status: 'aprobado',
-      reviewed_by: user.id,
-      review_notes: reviewNotes || null,
-      reviewed_at: new Date().toISOString(),
-    }).eq('id', count.id);
-
-    setDetailCount(null);
-    setReviewNotes('');
-    setReviewLoading(false);
-    if (profile) loadCounts(profile);
   };
 
   const rejectCount = async (count: PhysicalCount) => {
     setReviewLoading(true);
-    const { data: { user } } = await supabase.auth.getUser();
-    if (!user) return;
+    setReviewError('');
+    try {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) {
+        setReviewError('Sesión expirada. Vuelve a iniciar sesión.');
+        return;
+      }
 
-    await supabase.from('physical_counts').update({
-      status: 'rechazado',
-      reviewed_by: user.id,
-      review_notes: reviewNotes || 'Rechazado',
-      reviewed_at: new Date().toISOString(),
-    }).eq('id', count.id);
+      const { error } = await supabase.from('physical_counts').update({
+        status: 'rechazado',
+        reviewed_by: user.id,
+        review_notes: reviewNotes || 'Rechazado',
+        reviewed_at: new Date().toISOString(),
+      }).eq('id', count.id);
 
-    setDetailCount(null);
-    setReviewNotes('');
-    setReviewLoading(false);
-    if (profile) loadCounts(profile);
+      if (error) {
+        setReviewError(error.message);
+        return;
+      }
+
+      setDetailCount(null);
+      setReviewNotes('');
+      if (profile) loadCounts(profile);
+    } finally {
+      setReviewLoading(false);
+    }
   };
 
   // ── Export count as Excel ──
@@ -356,7 +390,7 @@ export default function PhysicalCountPage() {
           ) : (
             <div className="space-y-2">
               {filtered.map(c => (
-                <div key={c.id} className="flex items-center justify-between px-4 py-3 rounded-lg bg-[var(--bg-card)] border border-[var(--border)] hover:border-[var(--primary)] transition-colors cursor-pointer" onClick={() => { setDetailCount(c); setReviewNotes(''); }}>
+                <div key={c.id} className="flex items-center justify-between px-4 py-3 rounded-lg bg-[var(--bg-card)] border border-[var(--border)] hover:border-[var(--primary)] transition-colors cursor-pointer" onClick={() => { setDetailCount(c); setReviewNotes(''); setReviewError(''); }}>
                   <div className="min-w-0">
                     <p className="font-medium text-sm">
                       {c.area?.name || 'Área'} — {c.items?.length || 0} productos
@@ -462,7 +496,7 @@ export default function PhysicalCountPage() {
         {/* ─── DETAIL / REVIEW MODAL ─── */}
         {detailCount && (
           <div className="fixed inset-0 z-50 flex items-start justify-center pt-4 overflow-y-auto">
-            <div className="absolute inset-0 bg-black/50 backdrop-blur-sm" onClick={() => setDetailCount(null)} />
+            <div className="absolute inset-0 bg-black/50 backdrop-blur-sm" onClick={() => { setDetailCount(null); setReviewError(''); }} />
             <div className="relative bg-[var(--bg-card)] border border-[var(--border)] rounded-xl shadow-2xl w-full max-w-2xl mx-4 mb-8 overflow-hidden">
               <div className="flex items-center justify-between px-6 py-4 border-b border-[var(--border)]">
                 <div>
@@ -475,7 +509,7 @@ export default function PhysicalCountPage() {
                   <span className={`text-xs font-medium px-2.5 py-1 rounded-full ${statusBadge(detailCount.status)}`}>
                     {statusLabel(detailCount.status)}
                   </span>
-                  <button onClick={() => setDetailCount(null)} className="p-1 rounded-md hover:bg-[var(--bg-input)] text-[var(--text-muted)]">
+                  <button onClick={() => { setDetailCount(null); setReviewError(''); }} className="p-1 rounded-md hover:bg-[var(--bg-input)] text-[var(--text-muted)]">
                     <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
                   </button>
                 </div>
@@ -529,9 +563,12 @@ export default function PhysicalCountPage() {
                 {/* Admin review actions */}
                 {profile?.role === 'admin' && detailCount.status === 'pendiente' && (
                   <div className="space-y-3 pt-2 border-t border-[var(--border)]">
+                    {reviewError && (
+                      <div className="text-sm text-red-400 bg-red-900/15 px-4 py-3 rounded-lg">{reviewError}</div>
+                    )}
                     <div>
                       <label className="block text-xs font-medium text-[var(--text-muted)] uppercase tracking-wider mb-1.5">Notas de revisión (opcional)</label>
-                      <input type="text" value={reviewNotes} onChange={e => setReviewNotes(e.target.value)} className="input-field text-sm" placeholder="Observaciones..." />
+                      <input type="text" value={reviewNotes} onChange={e => { setReviewNotes(e.target.value); setReviewError(''); }} className="input-field text-sm" placeholder="Observaciones..." />
                     </div>
                     <div className="flex gap-3">
                       <button onClick={() => approveCount(detailCount)} disabled={reviewLoading} className="btn-primary flex-1 py-2.5 text-sm font-medium disabled:opacity-50 flex items-center justify-center gap-2">

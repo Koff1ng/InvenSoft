@@ -116,18 +116,42 @@ export default function PhysicalCountPage() {
       return;
     }
 
-    let query = supabase.from('inventory_items').select('id, area_id, quantity, product:products(name, unit), area:areas(name)');
+    let areaIdsFilter: string[] | null = null;
     if (profile.role !== 'admin') {
-      // Include items from the user's area AND any child sub-areas
       const childAreas = await supabase.from('areas').select('id').eq('parent_id', areaId!);
-      const areaIds = [areaId!, ...(childAreas.data || []).map((a: any) => a.id)];
-      query = query.in('area_id', areaIds);
+      areaIdsFilter = [areaId!, ...(childAreas.data || []).map((a: any) => a.id)];
     }
 
-    const { data } = await query;
-    if (!data?.length) { setFormError('No hay productos en tu área'); return; }
+    const PAGE_SIZE = 1000;
+    const allRows: { id: string; area_id: string; quantity: number; product?: { name?: string; unit?: string } | null }[] = [];
+    let pageIdx = 0;
+    let hasMore = true;
+    while (hasMore) {
+      const from = pageIdx * PAGE_SIZE;
+      const to = from + PAGE_SIZE - 1;
+      let q = supabase
+        .from('inventory_items')
+        .select('id, area_id, quantity, product:products(name, unit), area:areas(name)')
+        .order('id', { ascending: true })
+        .range(from, to);
+      if (areaIdsFilter) q = q.in('area_id', areaIdsFilter);
+      const { data, error } = await q;
+      if (error) {
+        setFormError(error.message);
+        return;
+      }
+      if (!data?.length) {
+        hasMore = false;
+      } else {
+        allRows.push(...(data as typeof allRows));
+        if (data.length < PAGE_SIZE) hasMore = false;
+        else pageIdx++;
+      }
+    }
 
-    setCountItems(data.map((item: { id: string; area_id: string; quantity: number; product?: { name?: string; unit?: string } | null }) => ({
+    if (!allRows.length) { setFormError('No hay productos en tu área'); return; }
+
+    setCountItems(allRows.map((item) => ({
       inventory_item_id: item.id,
       area_id: item.area_id,
       product_name: item.product?.name || '—',

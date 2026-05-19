@@ -57,6 +57,9 @@ export async function GET(request: Request) {
     let query = supabase
       .from('inventory_items')
       .select('area_id, quantity, updated_at, product:products(name, unit, category, notes), area:areas(id, name, parent_id), sede:sedes(name)')
+      // Stable order is required for correct pagination across multiple requests
+      // (without ORDER BY, rows can shift between pages → duplicates or missing rows in export).
+      .order('id', { ascending: true })
       .range(from, to);
 
     if (sedeId) query = query.eq('sede_id', sedeId);

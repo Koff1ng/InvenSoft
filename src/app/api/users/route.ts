@@ -1,7 +1,57 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
+import { createServerClient } from '@supabase/ssr';
+import { cookies } from 'next/headers';
+import { getUserFromRequest } from '@/app/api/local-auth/route';
 
 const IS_CLOUD = !!(process.env.NEXT_PUBLIC_SUPABASE_URL && process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY);
+
+/** Reject unless the requester is an authenticated admin (prevents open abuse of service-role user management). */
+async function assertCallerIsAdmin(req: NextRequest): Promise<NextResponse | null> {
+  if (!IS_CLOUD) {
+    const user = getUserFromRequest(req);
+    if (!user) {
+      return NextResponse.json({ error: 'No autorizado' }, { status: 401 });
+    }
+    const { getProfileById } = await import('@/lib/local-db');
+    const profile = getProfileById(user.id) as { role?: string } | undefined;
+    if (!profile || profile.role !== 'admin') {
+      return NextResponse.json({ error: 'No autorizado' }, { status: 403 });
+    }
+    return null;
+  }
+
+  const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!;
+  const anonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!;
+  const cookieStore = await cookies();
+  const supabase = createServerClient(supabaseUrl, anonKey, {
+    cookies: {
+      getAll() {
+        return cookieStore.getAll();
+      },
+      setAll() {
+        /* read-only: session refresh not needed for this check */
+      },
+    },
+  });
+
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) {
+    return NextResponse.json({ error: 'No autorizado' }, { status: 401 });
+  }
+
+  const { data: profile, error } = await supabase
+    .from('profiles')
+    .select('role')
+    .eq('id', user.id)
+    .single();
+
+  if (error || !profile || profile.role !== 'admin') {
+    return NextResponse.json({ error: 'No autorizado' }, { status: 403 });
+  }
+
+  return null;
+}
 
 // Admin API: uses service_role key to manage users without affecting current session
 function getAdminClient() {
@@ -21,6 +71,9 @@ function toAuthEmail(username: string): string {
 
 export async function POST(req: NextRequest) {
   try {
+    const denied = await assertCallerIsAdmin(req);
+    if (denied) return denied;
+
     const body = await req.json();
     const { username, password, full_name, role, area_id } = body;
 
@@ -88,6 +141,9 @@ export async function POST(req: NextRequest) {
 // require admin/service_role privileges that the browser session doesn't have.
 export async function PATCH(req: NextRequest) {
   try {
+    const denied = await assertCallerIsAdmin(req);
+    if (denied) return denied;
+
     const body = await req.json();
     const { id, password, username } = body as { id?: string; password?: string; username?: string };
 

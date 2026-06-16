@@ -150,7 +150,21 @@ export default function OrdersPage() {
   }, [supabase]);
 
   const loadOrders = useCallback(async () => {
-    const { data: rawOrders } = await supabase.from('orders').select('*').order('created_at', { ascending: false });
+    let query = supabase.from('orders').select('*').order('created_at', { ascending: false });
+
+    if (profile?.role !== 'admin' && profile?.id) {
+      const allowedAreaIds = [
+        profile.area_id,
+        ...areas.filter((a) => a.parent_id === profile.area_id).map((a) => a.id),
+      ].filter((id): id is string => Boolean(id));
+      if (allowedAreaIds.length === 0) {
+        query = query.eq('created_by', profile.id);
+      } else {
+        query = query.or(`created_by.eq.${profile.id},area_id.in.(${allowedAreaIds.join(',')})`);
+      }
+    }
+
+    const { data: rawOrders } = await query;
     if (!rawOrders?.length) { setOrders([]); return; }
 
     // Enrich with areas, sedes, profiles
@@ -180,7 +194,7 @@ export default function OrdersPage() {
         item_count: Array.isArray(o.items) ? o.items.length : 0,
       };
     }));
-  }, [supabase]);
+  }, [supabase, profile?.role, profile?.id, profile?.area_id, areas]);
 
   const loadCatalog = useCallback(async () => {
     const { data } = await supabase.from('products').select('name, unit, category');
@@ -206,13 +220,13 @@ export default function OrdersPage() {
     } else {
       setLoading(false);
     }
-  }, [authLoading, profile]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [authLoading, profile, areas, loadOrders]);
 
   const filteredOrders = profile?.role === 'admin'
     ? orders
-    : orders.filter(o => {
-        const myAreaIds = [profile?.area_id, ...areas.filter(a => a.parent_id === profile?.area_id).map(a => a.id)];
-        return myAreaIds.includes(o.area_id);
+    : orders.filter((o) => {
+        const myAreaIds = [profile?.area_id, ...areas.filter((a) => a.parent_id === profile?.area_id).map((a) => a.id)].filter((id): id is string => Boolean(id));
+        return myAreaIds.includes(o.area_id) || o.created_by === profile?.id;
       });
 
   // ── Block helpers ──
@@ -364,6 +378,10 @@ export default function OrdersPage() {
 
   // ── Approve order ──
   const approveOrder = async (id: string) => {
+    if (profile?.role !== 'admin') {
+      showToast('No autorizado', 'error');
+      return;
+    }
     const isConfirmed = await askConfirm('¿Aprobar este pedido?');
     if (!isConfirmed) return;
     const { error } = await supabase.from('orders').update({ status: 'aprobado' }).eq('id', id);
@@ -382,9 +400,21 @@ export default function OrdersPage() {
   // ── View detail ──
   const viewOrder = async (id: string) => {
     const { data } = await supabase.from('orders').select('*').eq('id', id).single();
-    if (data) {
-      setDetailOrder(await enrichOrder(data));
+    if (!data) return;
+
+    if (profile?.role !== 'admin') {
+      const allowedAreaIds = [
+        profile?.area_id,
+        ...areas.filter((a) => a.parent_id === profile?.area_id).map((a) => a.id),
+      ].filter((aid): aid is string => Boolean(aid));
+      const isCreator = data.created_by === profile?.id;
+      if (!isCreator && !allowedAreaIds.includes(data.area_id)) {
+        showToast('No autorizado', 'error');
+        return;
+      }
     }
+
+    setDetailOrder(await enrichOrder(data));
   };
 
   // ── Export ──
@@ -506,7 +536,7 @@ export default function OrdersPage() {
 
                 <div className="flex items-center gap-2 pl-11 sm:pl-0">
                   <span className={`text-xs font-medium px-2.5 py-1 rounded-full ${o.status === 'aprobado' ? 'bg-blue-500/15 text-blue-400' : o.status === 'enviado' ? 'bg-green-500/15 text-green-400' : 'bg-yellow-500/15 text-yellow-400'}`}>
-                    {o.status === 'aprobado' ? 'Aprobado' : 'Enviado'}
+                    {o.status === 'aprobado' ? 'Aprobado' : o.status === 'enviado' ? 'Enviado' : 'Borrador'}
                   </span>
 
                   <button onClick={() => viewOrder(o.id)} className="p-1.5 rounded-md hover:bg-[var(--bg-input)] text-[var(--text-muted)] hover:text-[var(--text)]" title="Ver detalle">

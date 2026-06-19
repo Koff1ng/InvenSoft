@@ -1,7 +1,57 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { cookies } from 'next/headers';
+import { createServerClient } from '@supabase/ssr';
 import { createClient } from '@supabase/supabase-js';
 
 const IS_CLOUD = !!(process.env.NEXT_PUBLIC_SUPABASE_URL && process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY);
+
+/** Reject unless the session belongs to an admin (cloud: Supabase cookie session; local: lc_session). */
+async function requireAdmin(req: NextRequest): Promise<NextResponse | null> {
+  if (!IS_CLOUD) {
+    const { getUserFromRequest } = await import('@/app/api/local-auth/route');
+    const { getProfileById } = await import('@/lib/local-db');
+    const user = getUserFromRequest(req);
+    if (!user) {
+      return NextResponse.json({ error: 'No autorizado' }, { status: 401 });
+    }
+    const profile = getProfileById(user.id);
+    if (!profile || profile.role !== 'admin') {
+      return NextResponse.json({ error: 'No autorizado' }, { status: 403 });
+    }
+    return null;
+  }
+
+  const url = process.env.NEXT_PUBLIC_SUPABASE_URL!;
+  const anonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!;
+  const cookieStore = await cookies();
+  const supabase = createServerClient(url, anonKey, {
+    cookies: {
+      getAll() {
+        return cookieStore.getAll();
+      },
+      setAll() {
+        /* Route Handler is read-only for cookies; proxy refreshes session */
+      },
+    },
+  });
+
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) {
+    return NextResponse.json({ error: 'No autorizado' }, { status: 401 });
+  }
+
+  const { data: profile } = await supabase
+    .from('profiles')
+    .select('role')
+    .eq('id', user.id)
+    .single();
+
+  if (!profile || profile.role !== 'admin') {
+    return NextResponse.json({ error: 'No autorizado' }, { status: 403 });
+  }
+
+  return null;
+}
 
 // Admin API: uses service_role key to manage users without affecting current session
 function getAdminClient() {
@@ -21,6 +71,9 @@ function toAuthEmail(username: string): string {
 
 export async function POST(req: NextRequest) {
   try {
+    const forbidden = await requireAdmin(req);
+    if (forbidden) return forbidden;
+
     const body = await req.json();
     const { username, password, full_name, role, area_id } = body;
 
@@ -88,6 +141,9 @@ export async function POST(req: NextRequest) {
 // require admin/service_role privileges that the browser session doesn't have.
 export async function PATCH(req: NextRequest) {
   try {
+    const forbidden = await requireAdmin(req);
+    if (forbidden) return forbidden;
+
     const body = await req.json();
     const { id, password, username } = body as { id?: string; password?: string; username?: string };
 

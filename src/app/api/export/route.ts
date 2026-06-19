@@ -57,6 +57,9 @@ export async function GET(request: Request) {
     let query = supabase
       .from('inventory_items')
       .select('area_id, quantity, updated_at, product:products(name, unit, category, notes), area:areas(id, name, parent_id), sede:sedes(name)')
+      // Stable order required: without ORDER BY, OFFSET pagination can skip/duplicate rows
+      // across pages (and in pathological cases repeat the same page forever).
+      .order('id', { ascending: true })
       .range(from, to);
 
     if (sedeId) query = query.eq('sede_id', sedeId);
